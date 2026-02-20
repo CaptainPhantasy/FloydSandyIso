@@ -54,8 +54,10 @@ func (m *UI) modelInfo(width int) string {
 			} else {
 				contextWindow = int64(model.CatwalkCfg.ContextWindow)
 			}
+			// Subtract cache read tokens - they don't consume fresh context
+			contextUsed := m.session.CompletionTokens + m.session.PromptTokens - m.session.CacheReadTokens
 			modelContext = &common.ModelContextInfo{
-				ContextUsed:  m.session.CompletionTokens + m.session.PromptTokens,
+				ContextUsed:  contextUsed,
 				Cost:         m.session.Cost,
 				ModelContext: contextWindow,
 			}
