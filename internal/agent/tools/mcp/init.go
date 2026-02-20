@@ -109,6 +109,11 @@ func GetState(name string) (ClientInfo, bool) {
 
 // Close closes all MCP clients. This should be called during application shutdown.
 func Close() error {
+	// Stop health monitor first
+	if hm := GetHealthMonitor(); hm != nil {
+		hm.Stop()
+	}
+
 	var wg sync.WaitGroup
 	done := make(chan struct{}, 1)
 	go func() {
@@ -144,6 +149,10 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	slog.Info("Initializing MCP clients")
 	var wg sync.WaitGroup
 	stdioSem := make(chan struct{}, maxConcurrentStdio)
+
+	// Start health monitor
+	hm := GetHealthMonitor()
+	hm.Start(ctx)
 
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.MCP {
