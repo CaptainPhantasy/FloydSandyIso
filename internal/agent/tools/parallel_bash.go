@@ -53,7 +53,7 @@ type ParallelBashResponseMetadata struct {
 	Summary       string                `json:"summary"`
 }
 
-func NewParallelBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func NewParallelBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, allowedBannedCommands []string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ParallelBashToolName,
 		string(parallelBashDescriptionTmpl),
@@ -157,7 +157,7 @@ func NewParallelBashTool(permissions permission.Service, workingDir string, attr
 					}
 
 					// Start background shell
-					bgShell, err := bgManager.Start(execCtx, execWorkingDir, blockFuncs(), command.Command, command.Description)
+					bgShell, err := bgManager.Start(execCtx, execWorkingDir, blockFuncs(allowedBannedCommands), command.Command, command.Description)
 					if err != nil {
 						result.Error = fmt.Sprintf("Failed to start: %v", err)
 						result.ExitCode = 1

@@ -1295,6 +1295,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.exportSession(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRenameSession:
+		if msg.SessionID == "" {
+			cmds = append(cmds, util.ReportWarn("No active session to rename. Start a conversation first."))
+			break
+		}
+		if cmd := m.openRenameSessionDialog(msg.SessionID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -3038,6 +3047,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openConfigAuditDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.RenameSessionID:
+		var sessionID string
+		if m.session != nil {
+			sessionID = m.session.ID
+		}
+		if cmd := m.openRenameSessionDialog(sessionID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -3093,6 +3110,28 @@ func (m *UI) openConfigAuditDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(configAuditDialog)
+	return nil
+}
+
+// openRenameSessionDialog opens the rename session dialog.
+func (m *UI) openRenameSessionDialog(sessionID string) tea.Cmd {
+	if sessionID == "" {
+		return util.ReportWarn("No active session to rename")
+	}
+	if m.dialog.ContainsDialog(dialog.RenameSessionID) {
+		m.dialog.BringToFront(dialog.RenameSessionID)
+		return nil
+	}
+
+	// Fetch session from database
+	ctx := context.Background()
+	sess, err := m.com.App.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return util.ReportError(fmt.Errorf("failed to get session: %w", err))
+	}
+
+	renameDialog, _ := dialog.NewRenameSession(m.com, sess, m.com.App.Sessions)
+	m.dialog.OpenDialog(renameDialog)
 	return nil
 }
 

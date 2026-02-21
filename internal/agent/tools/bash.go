@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ const (
 	AutoBackgroundThreshold = 1 * time.Minute // Commands taking longer automatically become background jobs
 	MaxOutputLength         = 30000
 	BashNoOutput            = "no output"
+	ProgressCheckInterval   = 2 * time.Second // How often to check for progress output
 )
 
 //go:embed bash.tpl
@@ -139,8 +141,15 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelName string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+func bashDescription(attribution *config.Attribution, modelName string, allowedBannedCommands []string) string {
+	// Filter out allowed commands from the banned list for display
+	filteredBanned := make([]string, 0, len(bannedCommands))
+	for _, cmd := range bannedCommands {
+		if !slices.Contains(allowedBannedCommands, cmd) {
+			filteredBanned = append(filteredBanned, cmd)
+		}
+	}
+	bannedCommandsStr := strings.Join(filteredBanned, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
@@ -154,9 +163,17 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
+func blockFuncs(allowedBannedCommands []string) []shell.BlockFunc {
+	// Filter out allowed commands from the banned list
+	filteredBanned := make([]string, 0, len(bannedCommands))
+	for _, cmd := range bannedCommands {
+		if !slices.Contains(allowedBannedCommands, cmd) {
+			filteredBanned = append(filteredBanned, cmd)
+		}
+	}
+
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(filteredBanned),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -186,10 +203,10 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, allowedBannedCommands []string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelName)),
+		string(bashDescription(attribution, modelName, allowedBannedCommands)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
@@ -240,7 +257,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(allowedBannedCommands), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -295,7 +312,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(allowedBannedCommands), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}
@@ -308,6 +325,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			var stdout, stderr string
 			var done bool
 			var execErr error
+			var lastProgressOutput string
+			progressTicker := time.NewTicker(ProgressCheckInterval)
+			defer progressTicker.Stop()
 
 		waitLoop:
 			for {
@@ -316,6 +336,12 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					stdout, stderr, done, execErr = bgShell.GetOutput()
 					if done {
 						break waitLoop
+					}
+				case <-progressTicker.C:
+					// Capture intermediate output for progress feedback
+					currentOut, currentErr, _, _ := bgShell.GetOutput()
+					if currentOut != "" || currentErr != "" {
+						lastProgressOutput = formatProgressOutput(currentOut, currentErr, time.Since(startTime))
 					}
 				case <-timeout:
 					stdout, stderr, done, execErr = bgShell.GetOutput()
@@ -366,7 +392,17 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				Background:       true,
 				ShellID:          bgShell.ID,
 			}
-			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			
+			// Build response with progress output if available
+			var response string
+			elapsed := time.Since(startTime).Round(time.Second)
+			if lastProgressOutput != "" {
+				response = fmt.Sprintf("⏳ Command running for %s...\n\n%s\n\nBackground shell ID: %s\n\nUse job_output to check progress or job_kill to terminate.", 
+					elapsed, lastProgressOutput, bgShell.ID)
+			} else {
+				response = fmt.Sprintf("⏳ Command running for %s...\n\nBackground shell ID: %s\n\nUse job_output to check progress or job_kill to terminate.", 
+					elapsed, bgShell.ID)
+			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		})
 }
@@ -427,6 +463,41 @@ func countLines(s string) int {
 		return 0
 	}
 	return len(strings.Split(s, "\n"))
+}
+
+// formatProgressOutput creates a truncated progress snapshot for long-running commands
+func formatProgressOutput(stdout, stderr string, elapsed time.Duration) string {
+	const maxProgressLines = 10
+	
+	// Combine and get last N lines
+	var lines []string
+	if stdout != "" {
+		lines = append(lines, strings.Split(stdout, "\n")...)
+	}
+	if stderr != "" {
+		lines = append(lines, strings.Split(stderr, "\n")...)
+	}
+	
+	// Filter empty lines
+	var nonEmpty []string
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty = append(nonEmpty, l)
+		}
+	}
+	
+	if len(nonEmpty) == 0 {
+		return ""
+	}
+	
+	// Get last N lines
+	start := 0
+	if len(nonEmpty) > maxProgressLines {
+		start = len(nonEmpty) - maxProgressLines
+	}
+	
+	result := "Recent output:\n├─ " + strings.Join(nonEmpty[start:], "\n├─ ")
+	return result
 }
 
 func normalizeWorkingDir(path string) string {

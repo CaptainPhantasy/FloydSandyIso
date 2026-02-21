@@ -30,6 +30,7 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/oauth/copilot"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/permission"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/session"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/workflow"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -429,9 +430,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	// Get allowed banned commands from execution config
+	var allowedBannedCommands []string
+	if c.cfg.Options.Execution != nil {
+		allowedBannedCommands = c.cfg.Options.Execution.AllowedBannedCommands
+	}
+
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
-		tools.NewParallelBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName, allowedBannedCommands),
+		tools.NewParallelBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName, allowedBannedCommands),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -445,6 +452,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewContextStatusTool(c.sessions, c.cfg.GetModelContextWindow(config.SelectedModelTypeLarge)),
+		tools.NewSymbolIndexTool(c.cfg.WorkingDir()),
+		tools.NewVisionTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewWorkflowTool(workflow.NewEngine(c.cfg.WorkingDir())),
 	)
 
 	if c.lspClients.Len() > 0 {

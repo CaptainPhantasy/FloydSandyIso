@@ -422,6 +422,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.sessionID != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "rename_session", "Rename Session", "", ActionRenameSession{SessionID: c.sessionID}))
 	}
 	// Export Session is always visible but requires an active session to work
 	commands = append(commands, NewCommandItem(c.com.Styles, "export_session", "Export Session", "", ActionExportSession{SessionID: c.sessionID}))

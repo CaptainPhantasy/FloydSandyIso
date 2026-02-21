@@ -617,6 +617,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	aiMsgs, _ := a.preparePrompt(msgs)
 
+	// Prepare tiered context for smarter summarization
+	tc := PrepareTieredContext(msgs)
+
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
 	defer a.activeRequests.Del(sessionID)
@@ -635,7 +638,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	summaryPromptText := buildTieredSummaryPrompt(currentSession.Todos, tc)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -1259,4 +1262,17 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+// buildTieredSummaryPrompt constructs a tier-aware prompt for smarter summarization.
+func buildTieredSummaryPrompt(todos []session.Todo, tc *TieredContext) string {
+	var todoStr string
+	if len(todos) > 0 {
+		var sb strings.Builder
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		}
+		todoStr = sb.String()
+	}
+	return BuildTieredSummaryPrompt(todoStr, tc)
 }

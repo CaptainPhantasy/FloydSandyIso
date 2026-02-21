@@ -259,13 +259,14 @@ type FileOps struct {
 }
 
 type Execution struct {
-	Shell           string   `json:"shell,omitempty" jsonschema:"description=Shell to use for command execution,example=/bin/bash"`
-	TimeoutSeconds  int      `json:"timeout_seconds,omitempty" jsonschema:"description=Default timeout in seconds for command execution,default=30,example=30"`
-	MaxBufferBytes  int      `json:"max_buffer_bytes,omitempty" jsonschema:"description=Maximum output size in bytes to capture,default=5242880,example=5242880"`
-	AllowedPrefixes []string `json:"allowed_prefixes,omitempty" jsonschema:"description=Allowed command prefixes (optional allowlist)"`
-	AllowedPatterns []string `json:"allowed_patterns,omitempty" jsonschema:"description=Allowed command regex patterns (optional allowlist)"`
-	DeniedPrefixes  []string `json:"denied_prefixes,omitempty" jsonschema:"description=Denied command prefixes (optional denylist)"`
-	DeniedPatterns  []string `json:"denied_patterns,omitempty" jsonschema:"description=Denied command regex patterns (optional denylist)"`
+	Shell                  string   `json:"shell,omitempty" jsonschema:"description=Shell to use for command execution,example=/bin/bash"`
+	TimeoutSeconds         int      `json:"timeout_seconds,omitempty" jsonschema:"description=Default timeout in seconds for command execution,default=30,example=30"`
+	MaxBufferBytes         int      `json:"max_buffer_bytes,omitempty" jsonschema:"description=Maximum output size in bytes to capture,default=5242880,example=5242880"`
+	AllowedPrefixes        []string `json:"allowed_prefixes,omitempty" jsonschema:"description=Allowed command prefixes (optional allowlist)"`
+	AllowedPatterns        []string `json:"allowed_patterns,omitempty" jsonschema:"description=Allowed command regex patterns (optional allowlist)"`
+	DeniedPrefixes         []string `json:"denied_prefixes,omitempty" jsonschema:"description=Denied command prefixes (optional denylist)"`
+	DeniedPatterns         []string `json:"denied_patterns,omitempty" jsonschema:"description=Denied command regex patterns (optional denylist)"`
+	AllowedBannedCommands  []string `json:"allowed_banned_commands,omitempty" jsonschema:"description=Commands from the banned list to allow (e.g., curl, wget, ssh),example=curl,example=wget"`
 }
 
 type MCPs map[string]MCPConfig
@@ -717,6 +718,7 @@ func allToolNames() []string {
 		"agent",
 		"bash",
 		"parallel_bash",
+		"context_status",
 		"job_output",
 		"job_kill",
 		"download",
@@ -731,8 +733,11 @@ func allToolNames() []string {
 		"grep",
 		"ls",
 		"sourcegraph",
+		"symbol_index",
 		"todos",
 		"view",
+		"vision",
+		"workflow",
 		"write",
 	}
 }
