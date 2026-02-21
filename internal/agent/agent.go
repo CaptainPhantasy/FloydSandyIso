@@ -1037,12 +1037,27 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 	a.eventTokensUsed(session.ID, model, usage, cost)
 
+	// Debug: log usage values to diagnose display fluctuation
+	slog.Debug("updateSessionUsage",
+		"session_id", session.ID,
+		"api_input", usage.InputTokens,
+		"api_output", usage.OutputTokens,
+		"api_cache_read", usage.CacheReadTokens,
+		"api_cache_create", usage.CacheCreationTokens,
+		"prev_prompt", session.PromptTokens,
+		"prev_completion", session.CompletionTokens,
+		"prev_cache", session.CacheReadTokens,
+	)
+
 	if overrideCost != nil {
 		session.Cost += *overrideCost
 	} else {
 		session.Cost += cost
 	}
 
+	// InputTokens includes the full conversation history, so it replaces (not accumulates)
+	// OutputTokens is just this response's output
+	// CacheReadTokens is how much of THIS request was served from cache
 	session.CompletionTokens = usage.OutputTokens
 	session.PromptTokens = usage.InputTokens
 	session.CacheReadTokens = usage.CacheReadTokens

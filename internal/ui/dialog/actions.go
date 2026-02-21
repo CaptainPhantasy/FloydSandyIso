@@ -95,6 +95,12 @@ type (
 	}
 	// ActionConfigAudit opens the config audit dialog.
 	ActionConfigAudit struct{}
+	// ActionSelectAgent is a message indicating an agent has been selected from the library.
+	ActionSelectAgent struct {
+		AgentName        string
+		AgentDescription string
+		SystemPrompt     string
+	}
 )
 
 // Messages for API key input dialog.

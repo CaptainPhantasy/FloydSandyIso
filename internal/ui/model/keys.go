@@ -20,6 +20,9 @@ type KeyMap struct {
 		// History navigation
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
+
+		// AI Suggestion acceptance
+		AcceptSuggestion key.Binding
 	}
 
 	Chat struct {
@@ -150,6 +153,10 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+	)
+	km.Editor.AcceptSuggestion = key.NewBinding(
+		key.WithKeys("f1"),
+		key.WithHelp("f1", "accept suggestion"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

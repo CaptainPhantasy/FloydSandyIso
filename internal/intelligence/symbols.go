@@ -280,7 +280,8 @@ func (si *SymbolIndex) Stats() IndexStats {
 	defer si.mu.RUnlock()
 
 	stats := IndexStats{
-		Files: len(si.files),
+		Files:  len(si.files),
+		ByKind: make(map[SymbolKind]int),
 	}
 
 	for _, symbols := range si.symbols {

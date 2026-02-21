@@ -1274,6 +1274,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSelectAgent:
+		// Populate textarea with agent's system prompt
+		m.textarea.SetValue(msg.SystemPrompt)
+		m.textarea.Focus()
+		m.dialog.CloseDialog(dialog.AgentLibraryID)
+		cmds = append(cmds, util.ReportInfo("Agent selected: "+msg.AgentName+" - Press Enter to send"))
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -1742,6 +1748,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
+			case key.Matches(msg, m.keyMap.Editor.AcceptSuggestion):
+				m.acceptCommandSuggestion()
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
@@ -3058,6 +3066,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openRenameSessionDialog(sessionID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.AgentLibraryID:
+		if cmd := m.openAgentLibraryDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -3135,6 +3147,25 @@ func (m *UI) openRenameSessionDialog(sessionID string) tea.Cmd {
 
 	renameDialog, _ := dialog.NewRenameSession(m.com, sess, m.com.App.Sessions)
 	m.dialog.OpenDialog(renameDialog)
+	return nil
+}
+
+// openAgentLibraryDialog opens the agent library dialog.
+func (m *UI) openAgentLibraryDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.AgentLibraryID) {
+		m.dialog.BringToFront(dialog.AgentLibraryID)
+		return nil
+	}
+
+	// Get agents directory path
+	cfg := m.com.Config()
+	agentsDir := filepath.Join(cfg.WorkingDir(), "internal", "agents")
+
+	agentLibraryDialog, err := dialog.NewAgentLibrary(m.com, agentsDir)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(agentLibraryDialog)
 	return nil
 }
 
