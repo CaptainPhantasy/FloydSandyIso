@@ -25,8 +25,9 @@
 ┌────┬──────────────────────────────────────┬─────────────────────────────────┬────────────────────────┐
 │ ID │ Feature                              │ User Impact                     │ Docs Section          │
 ├────┼──────────────────────────────────────┼─────────────────────────────────┼────────────────────────┤
-│ 01 │ F1 Keybinding for AI Suggestion      │ Accept ghost text with F1       │ Quickstart            │
+│ 01 │ Ctrl+Y Keybinding for AI Suggestion   │ Accept ghost text with Ctrl+Y   │ Quickstart            │
 │ 02 │ Agent Library System                 │ Load agent personas from files  │ What's New            │
+│ 02a│ Agent Template System                │ _template.md for new agents     │ What's New            │
 │ 03 │ Streaming Tool Progress (Mod 4)      │ Real-time tool status updates   │ What's New            │
 │ 04 │ Context Status Tool                  │ Monitor token usage             │ What's New            │
 │ 05 │ Symbol Index Tool                    │ Code navigation                 │ What's New            │
@@ -44,12 +45,12 @@
 
 #### Executive Summary
 
-Floyd v4.0.0 introduces the Agent Library system, enabling users to define and switch between AI personas via markdown files. This release also includes F1 keybinding for accepting AI suggestions, streaming tool progress updates, context window monitoring, and improved safety through configurable command restrictions.
+Floyd v4.0.0 introduces the Agent Library system, enabling users to define and switch between AI personas via markdown files. This release also includes Ctrl+Y keybinding for accepting AI suggestions (F1 was unreliable in terminals), streaming tool progress updates, context window monitoring, and improved safety through configurable command restrictions.
 
 #### Detailed Changes by Area
 
 **User Interface:**
-- F1 key now accepts ghost text suggestions (previously Tab was occupied)
+- Ctrl+Y key now accepts ghost text suggestions (F1 was unreliable in terminals)
 - Agent Library accessible via Ctrl+P → Agent Library
 - Real-time progress indicators for grep, glob, and sourcegraph tools
 
@@ -110,8 +111,8 @@ Your persona instructions here.
 3. Press Ctrl+P → Select "Agent Library"
 4. Choose your agent → Press Enter to send
 
-**F1 Suggestion Acceptance:**
-- When ghost text appears, press F1 to accept it into the textarea
+**Ctrl+Y Suggestion Acceptance:**
+- When ghost text appears, press Ctrl+Y to accept it into the textarea
 
 #### Upgrade Steps
 
@@ -157,22 +158,22 @@ go build . && ./FloydDeployable
 4. Choose agent → system prompt populates textarea
 5. Press Enter to send
 
-**Example:**
+**Template System:**
+A `_template.md` file provides the canonical agent format. Copy and modify it to create new agents.
+
+**Example (Code Reviewer using the template format):**
 ```markdown
 ---
-name: Code Reviewer
-description: Expert code reviewer focused on quality
-trigger: review
-version: 1.0.0
-tags: [code, review, quality]
+name: "Code Reviewer"
+description: "Rigorous code review with evidence-backed feedback"
+trigger: "review"
+version: "1.0.0"
+tags: [code, review, security, quality]
 ---
 
-# Code Reviewer Persona
+You are Code Reviewer, a specialized agent within the Legacy AI ecosystem.
 
-You are an expert code reviewer. Focus on:
-- Code quality and maintainability
-- Security vulnerabilities
-- Performance implications
+Your mission is to ensure code quality, security, and maintainability...
 ```
 
 **Files:**
@@ -183,19 +184,19 @@ You are an expert code reviewer. Focus on:
 
 ---
 
-#### 2. F1 Keybinding for Suggestion Acceptance
+#### 2. Ctrl+Y Keybinding for Suggestion Acceptance
 
-**What it is:** F1 key accepts AI suggestion ghost text.
+**What it is:** Ctrl+Y key accepts AI suggestion ghost text.
 
-**Why it matters:** Tab was occupied by focus-switch behavior; F1 provides dedicated binding.
+**Why it matters:** Tab was occupied by focus-switch behavior; Ctrl+Y provides a reliable dedicated binding (F1 was unreliable in terminals due to help menu interception).
 
 **How to use:**
 1. Type in textarea to see ghost text suggestion
-2. Press F1 to accept suggestion
+2. Press Ctrl+Y to accept suggestion
 3. Press Enter to send
 
 **Files:**
-- `internal/ui/model/keys.go` - F1 binding definition
+- `internal/ui/model/keys.go` - Ctrl+Y binding definition
 - `internal/ui/model/ui.go` - Key handler
 
 ---
@@ -341,13 +342,13 @@ Content
 
 ---
 
-#### F1 Not Accepting Suggestion
+#### Ctrl+Y Not Accepting Suggestion
 
-**Symptom:** F1 press does nothing
+**Symptom:** Ctrl+Y press does nothing
 
 **Likely Cause:** No ghost text visible (empty textarea or no suggestion available)
 
-**Fix:** Ensure textarea has partial text that matches a suggestion
+**Fix:** Ensure textarea has partial text that matches a suggestion. Check logs at `~/.floyd/logs/` for debug messages.
 
 ---
 
@@ -359,8 +360,8 @@ A: Create a markdown file in `internal/agents/` with YAML frontmatter containing
 **Q: Can I share agents between projects?**
 A: Currently agents are project-local. Consider symlinking or copying agent files between projects.
 
-**Q: Why F1 instead of Tab?**
-A: Tab was already bound to focus-switch behavior. F1 provides a dedicated key without conflicts.
+**Q: Why Ctrl+Y instead of Tab or F1?**
+A: Tab was already bound to focus-switch behavior. F1 was unreliable in terminals (often intercepted for help menus). Ctrl+Y is a reliable dedicated binding.
 
 **Q: Does the Agent Library persist across sessions?**
 A: Agent definitions are loaded from files at dialog open time. The selected persona applies until session end or new selection.
