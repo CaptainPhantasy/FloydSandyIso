@@ -19,6 +19,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/lipgloss/v2"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools/mcp"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/csync"
@@ -413,6 +414,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "tool-progress", tools.SubscribeProgress, app.events)
 	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()

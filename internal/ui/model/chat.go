@@ -448,6 +448,20 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// UpdateToolProgress updates the progress of a tool message item by its tool call ID.
+// If the tool item is not found or doesn't support progress updates, this is a no-op.
+func (m *Chat) UpdateToolProgress(toolCallID string, message string, percent int) {
+	idx, ok := m.idInxMap[toolCallID]
+	if !ok {
+		return
+	}
+	item, ok := m.list.ItemAt(idx).(chat.ProgressUpdatable)
+	if !ok {
+		return
+	}
+	item.SetProgress(message, percent)
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {

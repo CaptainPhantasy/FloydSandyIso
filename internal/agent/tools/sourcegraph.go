@@ -47,6 +47,13 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 		SourcegraphToolName,
 		string(sourcegraphDescription),
 		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Create progress emitter for streaming updates
+			emitter := NewProgressEmitter(call.ID, func(e ToolProgressEvent) {
+				if progressCallback != nil {
+					progressCallback(call.ID, e)
+				}
+			})
+
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("Query parameter is required"), nil
 			}
@@ -60,6 +67,9 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			if params.ContextWindow <= 0 {
 				params.ContextWindow = 10 // Default context window
 			}
+
+			// Emit start after input validation
+			emitter.EmitStart("Submitting Sourcegraph query...")
 
 			// Handle timeout with context
 			requestCtx := ctx
@@ -104,11 +114,21 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("User-Agent", "floyd/1.0")
 
+			// Emit progress before HTTP request
+			emitter.Emit("Querying Sourcegraph API...", 20)
+
 			resp, err := client.Do(req)
 			if err != nil {
+				// Check for context timeout
+				if ctx.Err() == context.DeadlineExceeded {
+					emitter.Emit("Request timed out, partial results...", 80)
+				}
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 			}
 			defer resp.Body.Close()
+
+			// Emit progress while waiting for response
+			emitter.Emit("Receiving results...", 50)
 
 			if resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
@@ -132,6 +152,19 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to format results: " + err.Error()), nil
 			}
+
+			// Calculate result count for progress message
+			resultCount := 0
+			if data, ok := result["data"].(map[string]any); ok {
+				if search, ok := data["search"].(map[string]any); ok {
+					if results, ok := search["results"].(map[string]any); ok {
+						if matches, ok := results["results"].([]any); ok {
+							resultCount = len(matches)
+						}
+					}
+				}
+			}
+			emitter.EmitComplete(fmt.Sprintf("Found %d results", resultCount))
 
 			return fantasy.NewTextResponse(formattedResults), nil
 		})

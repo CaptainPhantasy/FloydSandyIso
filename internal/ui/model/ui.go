@@ -28,6 +28,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools/mcp"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/app"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/commands"
@@ -546,6 +547,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
+	case pubsub.Event[tools.ToolProgressEvent]:
+		m.chat.UpdateToolProgress(msg.Payload.ToolCallID, msg.Payload.Message, msg.Payload.Percent)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 

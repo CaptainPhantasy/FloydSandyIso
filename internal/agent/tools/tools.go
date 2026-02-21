@@ -5,10 +5,11 @@ import (
 )
 
 type (
-	sessionIDContextKey string
-	messageIDContextKey string
-	supportsImagesKey   string
-	modelNameKey        string
+	sessionIDContextKey      string
+	messageIDContextKey      string
+	supportsImagesKey        string
+	modelNameKey             string
+	progressCallbackCtxKey   string
 )
 
 const (
@@ -20,6 +21,8 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// ProgressCallbackContextKey is the key for the tool progress callback in the context.
+	ProgressCallbackContextKey progressCallbackCtxKey = "progress_callback"
 )
 
 // GetSessionFromContext retrieves the session ID from the context.
@@ -71,4 +74,18 @@ func GetModelNameFromContext(ctx context.Context) string {
 		return ""
 	}
 	return s
+}
+
+// GetProgressCallbackFromContext retrieves a progress callback bound to a specific tool call ID.
+// Returns nil if no callback is set in the context.
+func GetProgressCallbackFromContext(ctx context.Context) func(ToolProgressEvent) {
+	cb := ctx.Value(ProgressCallbackContextKey)
+	if cb == nil {
+		return nil
+	}
+	callback, ok := cb.(func(ToolProgressEvent))
+	if !ok {
+		return nil
+	}
+	return callback
 }

@@ -113,8 +113,9 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, context.CancelFunc]
+	messageQueue     *csync.Map[string, []SessionAgentCall]
+	activeRequests   *csync.Map[string, context.CancelFunc]
+	progressCallback tools.ProgressCallback
 }
 
 type SessionAgentOptions struct {
@@ -133,7 +134,8 @@ type SessionAgentOptions struct {
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	return &sessionAgent{
+	// Create the session agent
+	agent := &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -148,6 +150,16 @@ func NewSessionAgent(
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
+
+	// Set up progress callback that emits pubsub events
+	agent.progressCallback = func(toolCallID string, event tools.ToolProgressEvent) {
+		agent.emitProgress(toolCallID, event)
+	}
+
+	// Also set the package-level callback for tools that use it
+	tools.SetProgressCallback(agent.progressCallback)
+
+	return agent
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -332,6 +344,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+
+			// Inject progress callback into context for tools to emit progress events
+			if a.progressCallback != nil {
+				callContext = context.WithValue(callContext, tools.ProgressCallbackContextKey, func(event tools.ToolProgressEvent) {
+					// Note: Tool call ID will be set by the tool using its params.ID
+					// This callback is called from tools that have access to tool call ID
+					if a.progressCallback != nil {
+						// The tool should use the package-level callback with tool call ID
+						// This is a fallback for tools that don't have tool call ID
+						slog.Debug("Progress callback invoked without tool call ID", "message", event.Message, "percent", event.Percent)
+					}
+				})
+			}
+
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -1125,6 +1151,29 @@ func (a *sessionAgent) SetDynamicContext(dynamicContext string) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
+}
+
+// emitProgress publishes a tool progress event to the global progress broker.
+// This allows UI components to subscribe and receive real-time progress updates
+// during long-running tool operations.
+func (a *sessionAgent) emitProgress(toolCallID string, event tools.ToolProgressEvent) {
+	// Create a copy of the event with the tool call ID embedded
+	eventWithID := tools.ToolProgressEvent{
+		ToolCallID: toolCallID,
+		Status:     event.Status,
+		Message:    event.Message,
+		Percent:    event.Percent,
+		Timestamp:   event.Timestamp,
+	}
+
+	slog.Debug("Emitting tool progress event",
+		"tool_call_id", toolCallID,
+		"status", eventWithID.Status,
+		"message", eventWithID.Message,
+		"percent", eventWithID.Percent,
+	)
+
+	tools.PublishProgress(eventWithID)
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.

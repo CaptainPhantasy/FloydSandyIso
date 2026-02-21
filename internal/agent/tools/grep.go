@@ -117,6 +117,13 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 		GrepToolName,
 		string(grepDescription),
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Create progress emitter for streaming updates
+			emitter := NewProgressEmitter(call.ID, func(e ToolProgressEvent) {
+				if progressCallback != nil {
+					progressCallback(call.ID, e)
+				}
+			})
+
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
@@ -132,10 +139,22 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 				searchPath = workingDir
 			}
 
-			matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
+			// Emit start progress
+			emitter.EmitStart("Starting grep search...")
+
+			matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100, emitter)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}
+
+			// Count unique files with matches
+			filesWithMatches := make(map[string]bool)
+			for _, m := range matches {
+				filesWithMatches[m.path] = true
+			}
+
+			// Emit completion progress
+			emitter.EmitComplete(fmt.Sprintf("Found %d matches in %d files", len(matches), len(filesWithMatches)))
 
 			var output strings.Builder
 			if len(matches) == 0 {
@@ -182,13 +201,13 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 		})
 }
 
-func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
+func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int, emitter *ProgressEmitter) ([]grepMatch, bool, error) {
+	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include, emitter)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
+		matches, err = searchFilesWithRegex(pattern, rootPath, include, emitter)
 		if err != nil {
 			return nil, false, err
-		}
+			}
 	}
 
 	sort.Slice(matches, func(i, j int) bool {
@@ -203,7 +222,7 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 	return matches, truncated, nil
 }
 
-func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+func searchWithRipgrep(ctx context.Context, pattern, path, include string, emitter *ProgressEmitter) ([]grepMatch, error) {
 	cmd := getRgSearchCmd(ctx, pattern, path, include)
 	if cmd == nil {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
@@ -226,10 +245,19 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	}
 
 	var matches []grepMatch
+	filesScanned := 0
 	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
 		}
+		filesScanned++
+
+		// Emit progress every 100 files during ripgrep processing
+		if emitter != nil && filesScanned%100 == 0 {
+			percent := min(90, filesScanned/10) // Rough estimate for ripgrep
+			emitter.Emit(fmt.Sprintf("Processing results, scanned %d files, %d matches...", filesScanned, len(matches)), percent)
+		}
+
 		var match ripgrepMatch
 		if err := json.Unmarshal(line, &match); err != nil {
 			continue
@@ -272,7 +300,7 @@ type ripgrepMatch struct {
 	} `json:"data"`
 }
 
-func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
+func searchFilesWithRegex(pattern, rootPath, include string, emitter *ProgressEmitter) ([]grepMatch, error) {
 	matches := []grepMatch{}
 
 	// Use cached regex compilation
@@ -292,6 +320,10 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 
 	// Create walker with gitignore and floydignore support
 	walker := fsext.NewFastGlobWalker(rootPath)
+
+	// Estimate total files for progress calculation (rough estimate)
+	totalEstimated := 1000 // Default estimate
+	filesScanned := 0
 
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -315,6 +347,14 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 		base := filepath.Base(path)
 		if base != "." && strings.HasPrefix(base, ".") {
 			return nil
+		}
+
+		filesScanned++
+
+		// Emit progress every 100 files
+		if emitter != nil && filesScanned%100 == 0 {
+			percent := min(90, int(float64(filesScanned)/float64(totalEstimated)*100))
+			emitter.Emit(fmt.Sprintf("Scanned %d files, %d matches...", filesScanned, len(matches)), percent)
 		}
 
 		if includePattern != nil && !includePattern.MatchString(path) {

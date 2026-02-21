@@ -3,9 +3,11 @@ package tools
 import (
 	"bytes"
 	"context"
+	"errors"
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -13,6 +15,8 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/fsext"
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/charlievieth/fastwalk"
 )
 
 const GlobToolName = "glob"
@@ -35,19 +39,32 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 		GlobToolName,
 		string(globDescription),
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Create progress emitter at the top of the handler
+			emitter := NewProgressEmitter(call.ID, func(e ToolProgressEvent) {
+				if progressCallback != nil {
+					progressCallback(call.ID, e)
+				}
+			})
+
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
+
+			// Emit start after input validation
+			emitter.EmitStart("Starting file search...")
 
 			searchPath := params.Path
 			if searchPath == "" {
 				searchPath = workingDir
 			}
 
-			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
+			files, truncated, err := globFilesWithProgress(ctx, params.Pattern, searchPath, 100, emitter)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error finding files: %w", err)
 			}
+
+			// Emit completion
+			emitter.EmitComplete(fmt.Sprintf("Found %d matching files", len(files)))
 
 			var output string
 			if len(files) == 0 {
@@ -68,6 +85,120 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 				},
 			), nil
 		})
+}
+
+func globFilesWithProgress(ctx context.Context, pattern, searchPath string, limit int, emitter *ProgressEmitter) ([]string, bool, error) {
+	// Try ripgrep first
+	cmdRg := getRgCmd(ctx, pattern)
+	if cmdRg != nil {
+		cmdRg.Dir = searchPath
+		matches, err := runRipgrep(cmdRg, searchPath, limit)
+		if err == nil {
+			return matches, len(matches) >= limit && limit > 0, nil
+		}
+		slog.Warn("Ripgrep execution failed, falling back to doublestar", "error", err)
+	}
+
+	// Use custom walker with progress tracking
+	return globWithDoubleStarAndProgress(pattern, searchPath, limit, emitter)
+}
+
+func globWithDoubleStarAndProgress(pattern, searchPath string, limit int, emitter *ProgressEmitter) ([]string, bool, error) {
+	// Normalize pattern to forward slashes
+	pattern = filepath.ToSlash(pattern)
+
+	walker := fsext.NewFastGlobWalker(searchPath)
+
+	var dirsScanned int
+	var filesFound int
+	maxDepth := 50 // Default max depth for percent calculation
+
+	type fileResult struct {
+		path    string
+		modTime int64
+	}
+	var results []fileResult
+	var truncated bool
+
+	conf := fastwalk.Config{
+		Follow:  true,
+		ToSlash: fastwalk.DefaultToSlash(),
+		Sort:    fastwalk.SortFilesFirst,
+	}
+
+	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip files we can't access
+		}
+
+		if d.IsDir() {
+			dirsScanned++
+			if walker.ShouldSkip(path) {
+				return filepath.SkipDir
+			}
+
+			// Emit progress every 50 directories
+			if dirsScanned%50 == 0 {
+				percent := min(90, int(float64(dirsScanned)/float64(maxDepth*10)*100))
+				emitter.Emit(fmt.Sprintf("Scanned %d directories, found %d files...", dirsScanned, filesFound), percent)
+			}
+		} else {
+			// Track files for progress reporting
+			filesFound++
+		}
+
+		if walker.ShouldSkip(path) {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(searchPath, path)
+		if err != nil {
+			relPath = path
+		}
+
+		// Normalize separators to forward slashes
+		relPath = filepath.ToSlash(relPath)
+
+		// Check if path matches the pattern
+		matched, err := doublestar.Match(pattern, relPath)
+		if err != nil || !matched {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		results = append(results, fileResult{path: path, modTime: info.ModTime().UnixNano()})
+		if limit > 0 && len(results) >= limit*2 {
+			truncated = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
+		return nil, false, fmt.Errorf("fastwalk error: %w", err)
+	}
+
+	// Sort by modification time (newest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].modTime > results[j].modTime
+	})
+
+	// Apply limit
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+		truncated = true
+	}
+
+	matches := make([]string, len(results))
+	for i, r := range results {
+		matches[i] = r.path
+	}
+
+	return matches, truncated || errors.Is(err, filepath.SkipAll), nil
 }
 
 func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {

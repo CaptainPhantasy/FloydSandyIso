@@ -37,6 +37,7 @@ const (
 	ToolStatusSuccess
 	ToolStatusError
 	ToolStatusCanceled
+	ToolStatusInProgress
 )
 
 // ToolMessageItem represents a tool call message in the chat UI.
@@ -56,6 +57,11 @@ type ToolMessageItem interface {
 // When compact mode is enabled, tools render as a compact single-line header.
 type Compactable interface {
 	SetCompact(compact bool)
+}
+
+// ProgressUpdatable is an interface for tool items that can receive progress updates.
+type ProgressUpdatable interface {
+	SetProgress(message string, percent int)
 }
 
 // SpinningState contains the state passed to SpinningFunc for custom spinning logic.
@@ -96,6 +102,8 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
+	ProgressMessage string
+	ProgressPercent int
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -151,6 +159,10 @@ type baseToolMessageItem struct {
 	// spinningFunc allows tools to override the default spinning logic.
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
+
+	// Progress tracking
+	progressMessage string
+	progressPercent int
 
 	sty             *styles.Styles
 	anim            *anim.Anim
@@ -310,6 +322,8 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			Compact:         t.isCompact,
 			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
+			ProgressMessage: t.progressMessage,
+			ProgressPercent: t.progressPercent,
 		})
 		height = lipgloss.Height(content)
 		// cache the rendered content
@@ -406,6 +420,13 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 	return t.expandedContent
 }
 
+// SetProgress updates the progress message and percent for the tool.
+func (t *baseToolMessageItem) SetProgress(message string, percent int) {
+	t.progressMessage = message
+	t.progressPercent = percent
+	t.clearCache()
+}
+
 // HandleMouseClick implements MouseClickable.
 func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 	return btn == ansi.MouseLeft
@@ -433,6 +454,46 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim) string {
 	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
 }
 
+// renderMiniBar renders a compact progress bar (e.g., [████░░░░] 50%).
+func renderMiniBar(percent int) string {
+	const width = 8
+	if percent < 0 {
+		percent = 0
+	} else if percent > 100 {
+		percent = 100
+	}
+
+	filled := (percent * width) / 100
+	var bar strings.Builder
+	bar.WriteString("[")
+	for i := 0; i < width; i++ {
+		if i < filled {
+			bar.WriteString("█")
+		} else {
+			bar.WriteString("░")
+		}
+	}
+	bar.WriteString("]")
+	return bar.String()
+}
+
+// progressTool renders a tool with progress information.
+func progressTool(sty *styles.Styles, name string, message string, percent int, anim *anim.Anim) string {
+	icon := sty.Tool.IconPending.Render()
+	toolName := sty.Tool.NameNormal.Render(name)
+	progressBar := renderMiniBar(percent)
+
+	var animView string
+	if anim != nil {
+		animView = anim.Render()
+	}
+
+	if message != "" {
+		return fmt.Sprintf("%s %s %s (%s) %s", icon, toolName, message, progressBar, animView)
+	}
+	return fmt.Sprintf("%s %s (%s) %s", icon, toolName, progressBar, animView)
+}
+
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
 // Returns the rendered output and true if early state was handled.
 func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
@@ -446,6 +507,13 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
 	case ToolStatusRunning:
 		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...")
+	case ToolStatusInProgress:
+		progressMsg := opts.ProgressMessage
+		if progressMsg == "" {
+			progressMsg = "In progress"
+		}
+		msg = fmt.Sprintf("%s (%d%%)", progressMsg, opts.ProgressPercent)
+		msg = sty.Tool.StateWaiting.Render(msg)
 	default:
 		return "", false
 	}
