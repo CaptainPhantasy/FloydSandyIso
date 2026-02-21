@@ -88,6 +88,11 @@ func LoadAgents(dir string) ([]AgentDefinition, error) {
 			continue
 		}
 
+		// Skip template files (prefixed with _)
+		if strings.HasPrefix(entry.Name(), "_") {
+			continue
+		}
+
 		path := filepath.Join(dir, entry.Name())
 		agent, err := ParseAgentFile(path)
 		if err != nil {

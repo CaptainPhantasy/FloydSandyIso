@@ -1749,7 +1749,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
 			case key.Matches(msg, m.keyMap.Editor.AcceptSuggestion):
-				m.acceptCommandSuggestion()
+				slog.Debug("AcceptSuggestion key pressed", "aiSuggestion", m.aiSuggestion, "commandSuggestion", m.commandSuggestion, "textareaValue", m.textarea.Value())
+				if m.acceptCommandSuggestion() {
+					slog.Debug("Suggestion accepted successfully")
+				} else {
+					slog.Debug("No suggestion to accept")
+				}
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
