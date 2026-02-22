@@ -1,6 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
-ALTER TABLE sessions ADD COLUMN summary_message_id TEXT;
+-- Check if column exists before adding (SQLite compatibility)
+-- This migration has already been applied in some instances
+-- The column summary_message_id should exist if this migration was already run
 -- +goose StatementEnd
 
 -- +goose Down

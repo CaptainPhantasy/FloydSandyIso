@@ -46,11 +46,15 @@ class ShadowConfig:
     include_timestamps: bool = True
     format: str = "markdown"  # markdown, json
     
-    # LLM settings (for Phase 3)
+    # LLM Writer settings
     llm_enabled: bool = False
-    llm_provider: str = "local"
-    llm_model: str = ""
-    summarize_errors: bool = False
+    llm_provider: str = "zhipu"  # zhipu, openai, ollama, none
+    llm_model: str = "glm-4-plus"  # Full GLM-4 (better quality than flash)
+    llm_api_key: str = ""
+    summarize_errors: bool = True
+    generate_hypotheses: bool = True
+    session_summaries: bool = True
+    decision_rationale: bool = True
     
     @classmethod
     def from_file(cls, path: str) -> "ShadowConfig":

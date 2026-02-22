@@ -1,0 +1,17 @@
+{
+  "options": {
+    "execution": {
+      "allowed_banned_commands": ["curl", "wget"]
+    }
+  },
+  "mcp": {
+    "rube": {
+      "type": "streamable-http",
+      "url": "https://rube.app/mcp",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzAxS0M0S0gxMlA1REROQlo5WkE3RlZXRUJGIiwib3JnSWQiOiJvcmdfMDFLQzRLUlJTUjdITlZGRjU3VzI4MkhFMUIiLCJpYXQiOjE3NzE2OTMwMTl9.fwKyu0izPAh127tZQqsg6qA_Ku3qQmj3mItEneQ7K4g"
+      },
+      "timeout": 60
+    }
+  }
+}

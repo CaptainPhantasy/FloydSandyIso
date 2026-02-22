@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -20,8 +21,10 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/hyper"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/prompt"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/agents"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/csync"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/environment"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/filetracker"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/history"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/log"
@@ -30,6 +33,7 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/oauth/copilot"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/permission"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/session"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/version"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/workflow"
 	"golang.org/x/sync/errgroup"
 
@@ -60,6 +64,10 @@ type Coordinator interface {
 	SuggestFollowup(ctx context.Context, sessionID string) (string, error)
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	// Agent selection methods
+	ClassifyTask(prompt string) TaskClassification
+	GetAgentDefinition(name string) *agents.AgentDefinition
+	ListAvailableAgents() []string
 }
 
 type coordinator struct {
@@ -71,8 +79,9 @@ type coordinator struct {
 	filetracker filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 
-	currentAgent SessionAgent
-	agents       map[string]SessionAgent
+	currentAgent  SessionAgent
+	agents        map[string]SessionAgent
+	agentSelector *AgentSelector
 
 	readyWg errgroup.Group
 }
@@ -96,6 +105,16 @@ func NewCoordinator(
 		filetracker: filetracker,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
+	}
+
+	// Initialize agent selector for auto-selection
+	selector, err := NewAgentSelector(filepath.Join(cfg.WorkingDir(), "internal", "agents"))
+	if err != nil {
+		slog.Warn("Failed to initialize agent selector", "error", err)
+		// Continue without agent selection
+	} else {
+		c.agentSelector = selector
+		slog.Info("Agent selector initialized", "agents", len(selector.ListAgents()))
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -398,6 +417,40 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 			return err
 		}
 		result.SetTools(tools)
+		return nil
+	})
+
+	// Boot tool registry for agent discovery
+	c.readyWg.Go(func() error {
+		registry, err := tools.BootToolRegistry()
+		if err != nil {
+			slog.Warn("Failed to build tool registry", "error", err)
+			return nil // Non-fatal: continue without registry
+		}
+		slog.Info("Boot tool registry", "tools", registry.TotalTools, "servers", registry.TotalServers)
+		// TODO: Store in SUPERCACHE when available
+		// For now, the registry is available via tools.BootToolRegistry()
+		return nil
+	})
+
+	// Boot environment discovery for component paths
+	c.readyWg.Go(func() error {
+		envState := environment.Discover(c.cfg)
+		slog.Info("Boot environment discovery",
+			"total_components", envState.TotalComponents,
+			"active_components", envState.ActiveComponents,
+			"working_directory", envState.WorkingDirectory,
+		)
+		// TODO: Store in SUPERCACHE as system:environment_state when available
+		return nil
+	})
+
+	// Boot changelog for agent awareness of new features
+	c.readyWg.Go(func() error {
+		// Log changelog info at boot
+		slog.Info("Boot changelog", "version", version.Version, "summary", version.FormatCompact())
+		// TODO: Store in SUPERCACHE as system:version_changelog when available
+		// TODO: Include changelog in agent prompt for feature discovery
 		return nil
 	})
 
@@ -943,4 +996,28 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// ClassifyTask analyzes the prompt and returns task classification with suggested agent
+func (c *coordinator) ClassifyTask(prompt string) TaskClassification {
+	if c.agentSelector == nil {
+		return TaskClassification{Type: "code", Confidence: 0.5}
+	}
+	return c.agentSelector.ClassifyTask(prompt)
+}
+
+// GetAgentDefinition returns an agent definition by name
+func (c *coordinator) GetAgentDefinition(name string) *agents.AgentDefinition {
+	if c.agentSelector == nil {
+		return nil
+	}
+	return c.agentSelector.GetAgentByName(name)
+}
+
+// ListAvailableAgents returns names of all available agents
+func (c *coordinator) ListAvailableAgents() []string {
+	if c.agentSelector == nil {
+		return nil
+	}
+	return c.agentSelector.ListAgents()
 }

@@ -5,19 +5,21 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools/mcp"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/environment"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/common"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/styles"
 )
 
 // mcpInfo renders the MCP status section showing active MCP clients and their
-// tool/prompt counts.
+// tool/prompt counts, plus a boot summary showing total tool count and environment.
 func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	var mcps []mcp.ClientInfo
 	t := m.com.Styles
 
-	for _, mcp := range m.com.Config().MCP.Sorted() {
-		if state, ok := m.mcpStates[mcp.Name]; ok {
+	for _, mcpCfg := range m.com.Config().MCP.Sorted() {
+		if state, ok := m.mcpStates[mcpCfg.Name]; ok {
 			mcps = append(mcps, state)
 		}
 	}
@@ -26,12 +28,64 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	if isSection {
 		title = common.Section(t, title, width)
 	}
+
+	// Build boot summary with total tool count and environment
+	bootSummary := buildBootSummary(t, m.com.Config())
+
 	list := t.Subtle.Render("None")
 	if len(mcps) > 0 {
 		list = mcpList(t, mcps, width, maxItems)
 	}
 
-	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
+	content := bootSummary + "\n\n" + list
+	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, content))
+}
+
+// buildBootSummary returns a summary line showing total tools and environment state.
+func buildBootSummary(t *styles.Styles, cfg any) string {
+	// Get tool counts from registry
+	totalTools := tools.ToolCount()
+	totalServers := tools.ServerCount()
+
+	if totalTools == 0 && totalServers == 0 {
+		return t.Subtle.Render("Initializing tool registry...")
+	}
+
+	// Build summary line
+	summary := fmt.Sprintf("%d tools from %d servers", totalTools, totalServers)
+
+	// Add environment component count if we can discover it
+	// Note: We're using a simplified approach here - full discovery happens at agent boot
+	components := []string{}
+
+	// Quick check for known components in common locations
+	if exists("/Volumes/Storage/FloydDesktopWeb-v2") {
+		components = append(components, "desktop")
+	}
+	if exists("/Volumes/Storage/floyd-harness") {
+		components = append(components, "harness")
+	}
+	if exists("/Volumes/Storage/MCP") {
+		components = append(components, "mcp")
+	}
+	if exists("/Volumes/Storage/floyd-sandbox/FloydDeployable") {
+		components = append(components, "cli")
+	}
+
+	if len(components) > 0 {
+		summary += fmt.Sprintf(" | %d components", len(components)+2) // +2 for MCP and main CLI
+	}
+
+	// Add version info if available
+	// TODO: Import version package without causing import cycle
+	// summary += fmt.Sprintf(" | %s", "v4.0.0")
+
+	return t.Subtle.Render(summary)
+}
+
+// exists quickly checks if a path exists without full environment discovery
+func exists(path string) bool {
+	return environment.PathExists(path)
 }
 
 // mcpCounts formats tool and prompt counts for display.
