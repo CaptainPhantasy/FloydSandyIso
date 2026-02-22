@@ -32,6 +32,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// SetRootUse sets the root command's Use field dynamically
+func SetRootUse(name string) {
+	rootCmd.Use = name
+	// Update examples to use the actual binary name
+	rootCmd.Example = `
+# Run in interactive mode
+` + name + `
+
+# Run with debug logging
+` + name + ` -d
+
+# Run with debug logging in a specific directory
+` + name + ` -d -c /path/to/project
+
+# Run with custom data directory
+` + name + ` -D /path/to/custom/.floyd
+
+# Print version
+` + name + ` -v
+
+# Run a single non-interactive prompt
+` + name + ` run "Explain the use of context in Go"
+
+# Run in dangerous mode (auto-accept all permissions)
+` + name + ` -y
+  `
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom floyd data directory")
@@ -52,7 +80,6 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "floyd",
 	Short: "An AI assistant for software development",
 	Long:  "An AI assistant for software development and similar tasks with direct access to the terminal",
 	Example: `
@@ -77,6 +104,9 @@ floyd run "Explain the use of context in Go"
 # Run in dangerous mode (auto-accept all permissions)
 floyd -y
   `,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: false,
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {

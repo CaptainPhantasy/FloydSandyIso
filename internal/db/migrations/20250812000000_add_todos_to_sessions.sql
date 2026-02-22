@@ -1,6 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
-ALTER TABLE sessions ADD COLUMN todos TEXT;
+-- Skip if column already exists (database may be ahead of code)
+-- ALTER TABLE sessions ADD COLUMN todos TEXT;
 -- +goose StatementEnd
 
 -- +goose Down

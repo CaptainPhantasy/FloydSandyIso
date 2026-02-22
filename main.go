@@ -12,6 +12,12 @@ import (
 )
 
 func main() {
+	// Set the command name dynamically based on the binary name
+	if len(os.Args) > 0 {
+		binName := filepath.Base(os.Args[0])
+		cmd.SetRootUse(binName)
+	}
+
 	for _, arg := range os.Args[1:] {
 		if arg == "--version" || arg == "-v" {
 			cmd.Execute()
