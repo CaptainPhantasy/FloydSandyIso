@@ -18,3 +18,4 @@ floyd
 .env
 .env.local
 *.local.md
+floyd.json
