@@ -67,6 +67,10 @@ func init() {
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.PersistentFlags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
+	// GLM Model Shortcuts (override large model)
+	// These are convenience flags for quickly switching between GLM models
+	rootCmd.PersistentFlags().String("glm", "", "GLM model shortcut (5,47,47f,47x,46,46v,46vf,46vx,45,45v,45a,45ax,45f,4p,432)")
+
 	rootCmd.AddCommand(
 		runCmd,
 		dirsCmd,
@@ -103,6 +107,15 @@ floyd run "Explain the use of context in Go"
 
 # Run in dangerous mode (auto-accept all permissions)
 floyd -y
+
+# Use GLM-4.7 instead of default model
+floyd --glm 47
+
+# Use GLM-4.6 with a specific directory
+floyd --glm 46 -c /path/to/project
+
+# Use GLM-4.7 Flash (faster)
+floyd --glm 47f
   `,
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: false,
@@ -238,6 +251,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
+	glmShortcut, _ := cmd.Flags().GetString("glm")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -248,6 +262,13 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	cfg, err := config.Init(cwd, dataDir, debug)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply GLM model shortcut if specified
+	if glmShortcut != "" {
+		if err := applyGLMModelShortcut(cfg, glmShortcut); err != nil {
+			return nil, err
+		}
 	}
 
 	telemetry.InitDefault(shouldEnableMetrics(), telemetry.DefaultAdditionalData())
@@ -303,6 +324,47 @@ func initTelemetryForCmd(cmd *cobra.Command) error {
 	telemetry.Default().Track(telemetry.EventCommandRun, map[string]any{
 		"command": cmd.CommandPath(),
 	})
+	return nil
+}
+
+// applyGLMModelShortcut applies a GLM model shortcut to the config.
+// This overrides the large model configuration with the specified GLM model.
+func applyGLMModelShortcut(cfg *config.Config, shortcut string) error {
+	model, ok := GetGLMModelByFlag(shortcut)
+	if !ok {
+		return fmt.Errorf("unknown GLM model shortcut: %q (available: %v)", shortcut, ListGLMModelFlags())
+	}
+
+	slog.Info("Applying GLM model shortcut", "flag", shortcut, "model", model.ModelID)
+
+	// Update the large model configuration
+	if cfg.Models == nil {
+		cfg.Models = make(map[config.SelectedModelType]config.SelectedModel)
+	}
+
+	selectedModel := config.SelectedModel{
+		Model:    model.ModelID,
+		Provider: "zai", // GLM models use the zai provider
+	}
+
+	// Apply temperature if specified
+	if model.Temperature > 0 {
+		selectedModel.Temperature = &model.Temperature
+	}
+
+	// Apply thinking/reasoning configuration for models that support it
+	// Note: thinking is passed via provider_options for openai-compatible providers
+	if model.Reasoning != "" {
+		if selectedModel.ProviderOptions == nil {
+			selectedModel.ProviderOptions = make(map[string]any)
+		}
+		selectedModel.ProviderOptions["thinking"] = map[string]any{
+			"type": model.Reasoning,
+		}
+	}
+
+	cfg.Models[config.SelectedModelTypeLarge] = selectedModel
+
 	return nil
 }
 
