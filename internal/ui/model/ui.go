@@ -65,6 +65,9 @@ const pasteLinesThreshold = 10
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
+// Prompt usage refresh interval.
+const promptUsageRefreshInterval = 30 * time.Second
+
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
 
@@ -126,6 +129,9 @@ type (
 	promptUsageLoadedMsg struct {
 		userMessages map[string]int64
 	}
+
+	// promptUsageRefreshTickMsg is sent periodically to refresh prompt usage.
+	promptUsageRefreshTickMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -349,6 +355,7 @@ func (m *UI) Init() tea.Cmd {
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	cmds = append(cmds, m.loadPromptUsage())
+	cmds = append(cmds, m.startPromptUsageRefreshTicker())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
 	return tea.Batch(cmds...)
@@ -485,6 +492,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case promptUsageLoadedMsg:
 		m.localUserMessages = msg.userMessages
+
+	case promptUsageRefreshTickMsg:
+		// Reload prompt usage and schedule next refresh
+		cmds = append(cmds, m.loadPromptUsage())
+		cmds = append(cmds, m.startPromptUsageRefreshTicker())
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()

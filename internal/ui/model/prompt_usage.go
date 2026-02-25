@@ -30,6 +30,13 @@ func (m *UI) loadPromptUsage() tea.Cmd {
 	}
 }
 
+// startPromptUsageRefreshTicker starts a periodic ticker to refresh prompt usage.
+func (m *UI) startPromptUsageRefreshTicker() tea.Cmd {
+	return tea.Tick(promptUsageRefreshInterval, func(time.Time) tea.Msg {
+		return promptUsageRefreshTickMsg{}
+	})
+}
+
 func (m *UI) localPromptUsageCounts(now time.Time) (fiveHour, sevenDay int) {
 	sevenDayCutoff := now.Add(-7 * 24 * time.Hour).Unix()
 	fiveHourCutoff := now.Add(-5 * time.Hour).Unix()
