@@ -385,16 +385,16 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:         large,
+		SmallModel:         small,
+		SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
+		IsSubAgent:         isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:             c.permissions.SkipRequests(),
+		Sessions:           c.sessions,
+		Messages:           c.messages,
+		Tools:              nil,
+		Config:             c.cfg,
 	})
 
 	c.readyWg.Go(func() error {

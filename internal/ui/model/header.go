@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -34,8 +36,55 @@ type shadowState struct {
 	HeartbeatCount int    `json:"heartbeat_count"`
 }
 
-// checkShadowStatus checks if shadow daemon is running for the given project path
-func checkShadowStatus(projectPath string) (bool, int) {
+// shadowCacheData holds cached shadow status
+type shadowCacheData struct {
+	active     bool
+	heartbeats int
+	timestamp  time.Time
+}
+
+// shadowCache is a package-level cache for shadow status
+var shadowCache struct {
+	mu    sync.RWMutex
+	data  map[string]*shadowCacheData
+}
+
+func init() {
+	shadowCache.data = make(map[string]*shadowCacheData)
+}
+
+// checkShadowStatus checks if shadow daemon is running for the given project path.
+// Results are cached based on the TTL from config.
+func checkShadowStatus(projectPath string, ttl time.Duration) (bool, int) {
+	cacheKey := projectPath
+
+	// Check cache first
+	shadowCache.mu.RLock()
+	if cached, ok := shadowCache.data[cacheKey]; ok {
+		if time.Since(cached.timestamp) < ttl {
+			shadowCache.mu.RUnlock()
+			return cached.active, cached.heartbeats
+		}
+	}
+	shadowCache.mu.RUnlock()
+
+	// Cache miss or expired - read from file
+	active, heartbeats := readShadowStateFile(projectPath)
+
+	// Update cache
+	shadowCache.mu.Lock()
+	shadowCache.data[cacheKey] = &shadowCacheData{
+		active:     active,
+		heartbeats: heartbeats,
+		timestamp:  time.Now(),
+	}
+	shadowCache.mu.Unlock()
+
+	return active, heartbeats
+}
+
+// readShadowStateFile reads the shadow daemon state file directly.
+func readShadowStateFile(projectPath string) (bool, int) {
 	// Generate the same hash as the Python daemon: md5(path)[:12]
 	hasher := md5.New()
 	hasher.Write([]byte(projectPath))
@@ -147,12 +196,16 @@ func renderHeaderDetails(
 
 	var parts []string
 
-	// Check shadow status
+	// Check shadow status (if enabled in config)
 	cfg := com.Config()
-	shadowActive, heartbeats := checkShadowStatus(cfg.WorkingDir())
-	if shadowActive {
-		shadowIndicator := t.Header.Percentage.Render(fmt.Sprintf("♥%d", heartbeats))
-		parts = append(parts, shadowIndicator)
+	shadowCfg := cfg.Shadow()
+	if shadowCfg.Enabled != nil && *shadowCfg.Enabled {
+		ttl := time.Duration(shadowCfg.CacheTTLSeconds) * time.Second
+		shadowActive, heartbeats := checkShadowStatus(cfg.WorkingDir(), ttl)
+		if shadowActive {
+			shadowIndicator := t.Header.Percentage.Render(fmt.Sprintf("♥%d", heartbeats))
+			parts = append(parts, shadowIndicator)
+		}
 	}
 
 	errorCount := 0

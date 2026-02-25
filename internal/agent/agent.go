@@ -51,7 +51,6 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
-	zaiConcurrencyCooldown      = 2 * time.Second
 )
 
 //go:embed templates/title.md
@@ -63,16 +62,55 @@ var summaryPrompt []byte
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
 
-// --- FLOYD Z.AI 429 GATEWAY SAFEGUARD ---
+// --- FLOYD Rate Limiting ---
 // Global concurrency limiter. Restricts Floyd to 1 active LLM request
 // at a time across all tasks and sub-agents to prevent Gateway overload.
-var zaiConcurrencyLimiter = make(chan struct{}, 1)
+var globalConcurrencyLimiter = make(chan struct{}, 1)
 
-func withZAIConcurrencyGate[T any](fn func() (T, error)) (T, error) {
-	zaiConcurrencyLimiter <- struct{}{}
+// rateLimitConfig is an interface for accessing rate limit configuration.
+type rateLimitConfig interface {
+	RateLimit() config.RateLimitConfig
+}
+
+// withRateLimitGate applies rate limiting based on configuration.
+// If rate limiting is disabled or the provider is not in the filter list, it passes through.
+func withRateLimitGate[T any](cfg rateLimitConfig, provider string, fn func() (T, error)) (T, error) {
+	// If no config, use default behavior (rate limit all providers)
+	if cfg == nil {
+		return withConcurrencyGate(time.Second*2, fn)
+	}
+
+	rateLimit := cfg.RateLimit()
+
+	// If rate limiting is disabled, pass through
+	if rateLimit.Enabled == nil || !*rateLimit.Enabled {
+		return fn()
+	}
+
+	// If providers filter is set, check if this provider should be rate limited
+	if len(rateLimit.Providers) > 0 {
+		shouldLimit := false
+		for _, p := range rateLimit.Providers {
+			if strings.EqualFold(p, provider) {
+				shouldLimit = true
+				break
+			}
+		}
+		if !shouldLimit {
+			return fn()
+		}
+	}
+
+	cooldown := time.Duration(rateLimit.CooldownMs) * time.Millisecond
+	return withConcurrencyGate(cooldown, fn)
+}
+
+// withConcurrencyGate is the generic concurrency gate with configurable cooldown.
+func withConcurrencyGate[T any](cooldown time.Duration, fn func() (T, error)) (T, error) {
+	globalConcurrencyLimiter <- struct{}{}
 	defer func() {
-		time.Sleep(zaiConcurrencyCooldown)
-		<-zaiConcurrencyLimiter
+		time.Sleep(cooldown)
+		<-globalConcurrencyLimiter
 	}()
 
 	return fn()
@@ -128,6 +166,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	cfg                  *config.Config
 
 	messageQueue     *csync.Map[string, []SessionAgentCall]
 	activeRequests   *csync.Map[string, context.CancelFunc]
@@ -145,6 +184,7 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	Config               *config.Config
 }
 
 func NewSessionAgent(
@@ -163,6 +203,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		cfg:                  opts.Config,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -281,7 +322,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var currentAssistant *message.Message
 	var shouldSummarize bool
 
-	result, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+	result, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 		return agent.Stream(genCtx, fantasy.AgentStreamCall{
 			Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 			Files:            files,
@@ -685,7 +726,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildTieredSummaryPrompt(currentSession.Todos, tc)
 
-	resp, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+	resp, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 		return agent.Stream(genCtx, fantasy.AgentStreamCall{
 			Prompt:          summaryPromptText,
 			Messages:        aiMsgs,
@@ -794,7 +835,7 @@ func (a *sessionAgent) SuggestFollowup(ctx context.Context, sessionID string) (s
 	)
 
 	var maxTokens int64 = 50
-	resp, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+	resp, err := withRateLimitGate(a.cfg, smallModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 		return agent.Generate(ctx, fantasy.AgentCall{
 			Prompt:          "What should the user ask or do next?",
 			Messages:        aiMsgs,
@@ -953,7 +994,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Use the small model to generate the title.
 	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	resp, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+	resp, err := withRateLimitGate(a.cfg, model.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 		return agent.Stream(ctx, streamCall)
 	})
 	if err == nil {
@@ -964,7 +1005,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
-		resp, err = withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+		resp, err = withRateLimitGate(a.cfg, model.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 			return agent.Stream(ctx, streamCall)
 		})
 		if err == nil {

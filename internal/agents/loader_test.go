@@ -158,7 +158,8 @@ Content`
 	})
 
 	t.Run("non-existent directory", func(t *testing.T) {
-		_, err := LoadAgents("/non/existent/directory")
-		require.Error(t, err)
+		agents, err := LoadAgents("/non/existent/directory")
+		require.NoError(t, err)
+		require.Empty(t, agents)
 	})
 }

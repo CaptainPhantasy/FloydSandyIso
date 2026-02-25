@@ -7,15 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/message"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/styles"
-)
-
-const (
-	localMaxPlan5HourPromptLimit = 1600
-	localMaxPlan7DayPromptLimit  = 8000
-	localWarnThresholdPercent    = 75
-	localDangerThresholdPercent  = 90
 )
 
 func (m *UI) loadPromptUsage() tea.Cmd {
@@ -56,16 +50,25 @@ func (m *UI) localPromptUsageCounts(now time.Time) (fiveHour, sevenDay int) {
 
 func (m *UI) promptQuotaInfo(width int) string {
 	t := m.com.Styles
+
+	// Get config values
+	quotaCfg := m.promptQuotaConfig()
+
+	// If quota display is disabled, return empty string
+	if quotaCfg.Enabled == nil || !*quotaCfg.Enabled {
+		return ""
+	}
+
 	fiveHourCount, sevenDayCount := m.localPromptUsageCounts(time.Now())
 
-	fiveHourPct := usagePercent(fiveHourCount, localMaxPlan5HourPromptLimit)
-	sevenDayPct := usagePercent(sevenDayCount, localMaxPlan7DayPromptLimit)
+	fiveHourPct := usagePercent(fiveHourCount, quotaCfg.Limit5h)
+	sevenDayPct := usagePercent(sevenDayCount, quotaCfg.Limit7d)
 
-	fiveHourLine := fmt.Sprintf("● 5h prompts %d/%d (%d%%)", fiveHourCount, localMaxPlan5HourPromptLimit, fiveHourPct)
-	sevenDayLine := fmt.Sprintf("● 7d prompts %d/%d (%d%%)", sevenDayCount, localMaxPlan7DayPromptLimit, sevenDayPct)
+	fiveHourLine := fmt.Sprintf("● 5h prompts %d/%d (%d%%)", fiveHourCount, quotaCfg.Limit5h, fiveHourPct)
+	sevenDayLine := fmt.Sprintf("● 7d prompts %d/%d (%d%%)", sevenDayCount, quotaCfg.Limit7d, sevenDayPct)
 
-	fiveHourLine = usageSeverityStyle(t, fiveHourPct).Render(fiveHourLine)
-	sevenDayLine = usageSeverityStyle(t, sevenDayPct).Render(sevenDayLine)
+	fiveHourLine = usageSeverityStyle(t, fiveHourPct, quotaCfg).Render(fiveHourLine)
+	sevenDayLine = usageSeverityStyle(t, sevenDayPct, quotaCfg).Render(sevenDayLine)
 
 	note := t.Muted.Render("Local Floyd usage only")
 
@@ -80,6 +83,14 @@ func (m *UI) promptQuotaInfo(width int) string {
 	return lipgloss.NewStyle().Width(width).PaddingLeft(2).Render(content)
 }
 
+// promptQuotaConfig returns the prompt quota configuration with defaults.
+func (m *UI) promptQuotaConfig() config.PromptQuotaConfig {
+	if m.com == nil || m.com.Config() == nil {
+		return config.DefaultPromptQuotaConfig()
+	}
+	return m.com.Config().PromptQuota()
+}
+
 func usagePercent(current, limit int) int {
 	if limit <= 0 {
 		return 0
@@ -91,11 +102,11 @@ func usagePercent(current, limit int) int {
 	return pct
 }
 
-func usageSeverityStyle(t *styles.Styles, percent int) lipgloss.Style {
+func usageSeverityStyle(t *styles.Styles, percent int, cfg config.PromptQuotaConfig) lipgloss.Style {
 	switch {
-	case percent >= localDangerThresholdPercent:
+	case percent >= cfg.DangerPercent:
 		return t.Base.Foreground(t.Red)
-	case percent >= localWarnThresholdPercent:
+	case percent >= cfg.WarnPercent:
 		return t.Base.Foreground(t.Yellow)
 	default:
 		return t.Base.Foreground(t.Green)
