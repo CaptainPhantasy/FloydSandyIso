@@ -188,11 +188,12 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Completions  Completions  `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent  *bool        `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	RateLimit    *RateLimitConfig   `json:"rate_limit,omitempty" jsonschema:"description=API rate limiting settings"`
+	PromptQuota  *PromptQuotaConfig `json:"prompt_quota,omitempty" jsonschema:"description=Prompt usage quota display settings"`
+	Shadow       *ShadowConfig      `json:"shadow,omitempty" jsonschema:"description=Shadow daemon integration settings"`
 }
 
 // Completions defines options for the completions UI.
@@ -203,6 +204,30 @@ type Completions struct {
 
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
+}
+
+// RateLimitConfig controls API rate limiting behavior.
+type RateLimitConfig struct {
+	Enabled       *bool    `json:"enabled,omitempty" jsonschema:"description=Enable rate limiting for LLM requests,default=true"`
+	CooldownMs    int      `json:"cooldown_ms,omitempty" jsonschema:"description=Milliseconds to wait between LLM requests,default=2000"`
+	MaxConcurrent int      `json:"max_concurrent,omitempty" jsonschema:"description=Maximum simultaneous LLM requests,default=1"`
+	Providers     []string `json:"providers,omitempty" jsonschema:"description=Provider names to rate limit (e.g., zai, openai). Empty = all providers"`
+}
+
+// PromptQuotaConfig controls prompt usage tracking and display.
+type PromptQuotaConfig struct {
+	Enabled       *bool `json:"enabled,omitempty" jsonschema:"description=Show prompt quota in sidebar,default=true"`
+	Limit5h       int   `json:"limit_5h,omitempty" jsonschema:"description=5-hour prompt limit for warnings,default=1600"`
+	Limit7d       int   `json:"limit_7d,omitempty" jsonschema:"description=7-day prompt limit for warnings,default=8000"`
+	WarnPercent   int   `json:"warn_percent,omitempty" jsonschema:"description=Percentage at which to show warning color (yellow),default=75"`
+	DangerPercent int   `json:"danger_percent,omitempty" jsonschema:"description=Percentage at which to show danger color (red),default=90"`
+}
+
+// ShadowConfig controls shadow daemon integration.
+type ShadowConfig struct {
+	Enabled         *bool  `json:"enabled,omitempty" jsonschema:"description=Show shadow daemon status in header,default=true"`
+	StatePath       string `json:"state_path,omitempty" jsonschema:"description=Override path to shadow state directory (supports ~ expansion)"`
+	CacheTTLSeconds int    `json:"cache_ttl_seconds,omitempty" jsonschema:"description=Seconds to cache shadow status before re-reading,default=5"`
 }
 
 type Permissions struct {

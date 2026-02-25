@@ -932,3 +932,99 @@ func GlobalSkillsDirs() []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// --- Runtime Behavior Config Accessors ---
+
+// RateLimit returns the rate limit configuration with defaults applied.
+func (c *Config) RateLimit() RateLimitConfig {
+	if c.Options.TUI == nil || c.Options.TUI.RateLimit == nil {
+		return DefaultRateLimitConfig()
+	}
+	cfg := *c.Options.TUI.RateLimit
+	def := DefaultRateLimitConfig()
+	if cfg.Enabled == nil {
+		cfg.Enabled = def.Enabled
+	}
+	if cfg.CooldownMs == 0 {
+		cfg.CooldownMs = def.CooldownMs
+	}
+	if cfg.MaxConcurrent == 0 {
+		cfg.MaxConcurrent = def.MaxConcurrent
+	}
+	return cfg
+}
+
+// PromptQuota returns the prompt quota configuration with defaults applied.
+func (c *Config) PromptQuota() PromptQuotaConfig {
+	if c.Options.TUI == nil || c.Options.TUI.PromptQuota == nil {
+		return DefaultPromptQuotaConfig()
+	}
+	cfg := *c.Options.TUI.PromptQuota
+	def := DefaultPromptQuotaConfig()
+	if cfg.Enabled == nil {
+		cfg.Enabled = def.Enabled
+	}
+	if cfg.Limit5h == 0 {
+		cfg.Limit5h = def.Limit5h
+	}
+	if cfg.Limit7d == 0 {
+		cfg.Limit7d = def.Limit7d
+	}
+	if cfg.WarnPercent == 0 {
+		cfg.WarnPercent = def.WarnPercent
+	}
+	if cfg.DangerPercent == 0 {
+		cfg.DangerPercent = def.DangerPercent
+	}
+	return cfg
+}
+
+// Shadow returns the shadow daemon configuration with defaults applied.
+func (c *Config) Shadow() ShadowConfig {
+	if c.Options.TUI == nil || c.Options.TUI.Shadow == nil {
+		return DefaultShadowConfig()
+	}
+	cfg := *c.Options.TUI.Shadow
+	def := DefaultShadowConfig()
+	if cfg.Enabled == nil {
+		cfg.Enabled = def.Enabled
+	}
+	if cfg.CacheTTLSeconds == 0 {
+		cfg.CacheTTLSeconds = def.CacheTTLSeconds
+	}
+	return cfg
+}
+
+// DefaultRateLimitConfig returns the default rate limit configuration.
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{
+		Enabled:       ptr(true),
+		CooldownMs:    2000,
+		MaxConcurrent: 1,
+		Providers:     []string{}, // Empty = all providers
+	}
+}
+
+// DefaultPromptQuotaConfig returns the default prompt quota configuration.
+func DefaultPromptQuotaConfig() PromptQuotaConfig {
+	return PromptQuotaConfig{
+		Enabled:       ptr(true),
+		Limit5h:       1600,
+		Limit7d:       8000,
+		WarnPercent:   75,
+		DangerPercent: 90,
+	}
+}
+
+// DefaultShadowConfig returns the default shadow daemon configuration.
+func DefaultShadowConfig() ShadowConfig {
+	return ShadowConfig{
+		Enabled:         ptr(true),
+		CacheTTLSeconds: 5,
+	}
+}
+
+// ptr is a helper to get a pointer to a value.
+func ptr[T any](v T) *T {
+	return &v
+}
