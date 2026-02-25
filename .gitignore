@@ -19,3 +19,4 @@ floyd
 .env.local
 *.local.md
 floyd.json
+floyd-sandy-iso
