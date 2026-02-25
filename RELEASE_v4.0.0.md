@@ -95,7 +95,7 @@ Floyd v4.0.0 introduces the Agent Library system, enabling users to define and s
 #### How To Enable New Features
 
 **Agent Library:**
-1. Create markdown files in `internal/agents/`:
+1. Create markdown files in either your project's `internal/agents/` or the global `~/.floyd/internal/agents/` directory:
 ```markdown
 ---
 name: My Agent
@@ -152,7 +152,7 @@ go build . && ./FloydDeployable
 **Why it matters:** Quickly switch between specialized agents (code reviewer, release auditor, etc.) without modifying configuration files.
 
 **How to use:**
-1. Create `internal/agents/{name}.md` with frontmatter
+1. Create `internal/agents/{name}.md` (local) or `~/.floyd/internal/agents/{name}.md` (global) with frontmatter
 2. Open commands menu (Ctrl+P)
 3. Select "Agent Library"
 4. Choose agent → system prompt populates textarea
@@ -358,7 +358,7 @@ Content
 A: Create a markdown file in `internal/agents/` with YAML frontmatter containing `name` and `description` fields. The body becomes the system prompt.
 
 **Q: Can I share agents between projects?**
-A: Currently agents are project-local. Consider symlinking or copying agent files between projects.
+A: Yes! You can now place agent markdown files in your global `~/.floyd/internal/agents/` directory. These global agents will be available in the Agent Library regardless of which project folder you launch Floyd from. You can also still use project-local agents by placing them in the `internal/agents/` directory of your specific project.
 
 **Q: Why Ctrl+Y instead of Tab or F1?**
 A: Tab was already bound to focus-switch behavior. F1 was unreliable in terminals (often intercepted for help menus). Ctrl+Y is a reliable dedicated binding.

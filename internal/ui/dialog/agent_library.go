@@ -15,7 +15,7 @@ import (
 
 const (
 	// AgentLibraryID is the identifier for the agent library dialog.
-	AgentLibraryID = "agent_library"
+	AgentLibraryID              = "agent_library"
 	agentLibraryDialogMaxWidth  = 70
 	agentLibraryDialogMaxHeight = 20
 )
@@ -52,7 +52,7 @@ var (
 )
 
 // NewAgentLibrary creates a new agent library dialog.
-func NewAgentLibrary(com *common.Common, agentsDir string) (*AgentLibrary, error) {
+func NewAgentLibrary(com *common.Common, agentsDirs []string) (*AgentLibrary, error) {
 	a := &AgentLibrary{com: com}
 
 	help := help.New()
@@ -86,18 +86,28 @@ func NewAgentLibrary(com *common.Common, agentsDir string) (*AgentLibrary, error
 	)
 	a.keyMap.Close = CloseKey
 
-	a.loadAgents(agentsDir)
+	a.loadAgents(agentsDirs)
 
 	return a, nil
 }
 
-// loadAgents loads agents from the specified directory.
-func (a *AgentLibrary) loadAgents(dir string) {
-	loaded, err := agents.LoadAgents(dir)
-	if err != nil {
-		a.agents = []agents.AgentDefinition{}
-	} else {
-		a.agents = loaded
+// loadAgents loads agents from the specified directories.
+func (a *AgentLibrary) loadAgents(dirs []string) {
+	a.agents = []agents.AgentDefinition{}
+
+	// Track seen agents to avoid duplicates (preferring project-local over global)
+	seen := make(map[string]bool)
+
+	for _, dir := range dirs {
+		loaded, err := agents.LoadAgents(dir)
+		if err == nil {
+			for _, agent := range loaded {
+				if !seen[agent.Name] {
+					a.agents = append(a.agents, agent)
+					seen[agent.Name] = true
+				}
+			}
+		}
 	}
 
 	items := make([]list.FilterableItem, 0, len(a.agents))

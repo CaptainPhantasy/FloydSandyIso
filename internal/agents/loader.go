@@ -19,12 +19,12 @@ type AgentDefinition struct {
 	Description string `yaml:"description"` // Human-readable description
 
 	// Optional fields
-	Trigger      string   `yaml:"trigger,omitempty"`      // Keyword to invoke the agent
-	Version      string   `yaml:"version,omitempty"`      // Agent version (semver recommended)
-	Author       string   `yaml:"author,omitempty"`       // Agent author
-	Tags         []string `yaml:"tags,omitempty"`         // Classification tags
-	SystemPrompt string   `yaml:"-"`                      // Markdown body (system prompt content)
-	FilePath     string   `yaml:"-"`                      // Absolute path to the agent file
+	Trigger      string   `yaml:"trigger,omitempty"` // Keyword to invoke the agent
+	Version      string   `yaml:"version,omitempty"` // Agent version (semver recommended)
+	Author       string   `yaml:"author,omitempty"`  // Agent author
+	Tags         []string `yaml:"tags,omitempty"`    // Classification tags
+	SystemPrompt string   `yaml:"-"`                 // Markdown body (system prompt content)
+	FilePath     string   `yaml:"-"`                 // Absolute path to the agent file
 }
 
 // Validate checks that required fields are present.
@@ -74,6 +74,9 @@ func ParseAgentFile(path string) (AgentDefinition, error) {
 func LoadAgents(dir string) ([]AgentDefinition, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // Return empty list if directory doesn't exist
+		}
 		return nil, fmt.Errorf("reading agents directory: %w", err)
 	}
 

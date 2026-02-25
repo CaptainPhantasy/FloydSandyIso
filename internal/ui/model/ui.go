@@ -25,9 +25,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/screen"
-	"github.com/charmbracelet/x/editor"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools/mcp"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/app"
@@ -51,6 +48,9 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/terminal"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/util"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/version"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/editor"
 )
 
 // Compact mode breakpoints.
@@ -121,6 +121,11 @@ type (
 
 	// aiSuggestionMsg is sent when an AI-generated followup suggestion is ready
 	aiSuggestionMsg string
+
+	// promptUsageLoadedMsg is sent when local prompt usage has been loaded.
+	promptUsageLoadedMsg struct {
+		userMessages map[string]int64
+	}
 )
 
 // UI represents the main user interface model.
@@ -235,6 +240,10 @@ type UI struct {
 	// Embedded terminal panel.
 	term         *terminal.Component
 	terminalOpen bool
+
+	// localUserMessages tracks local user-message timestamps keyed by message ID.
+	// It powers local 5-hour and 7-day prompt usage indicators in the sidebar.
+	localUserMessages map[string]int64
 }
 
 // New creates a new instance of the [UI] model.
@@ -281,17 +290,18 @@ func New(com *common.Common) *UI {
 	header := newHeader(com)
 
 	ui := &UI{
-		com:         com,
-		dialog:      dialog.NewOverlay(),
-		keyMap:      keyMap,
-		textarea:    ta,
-		chat:        ch,
-		header:      header,
-		completions: comp,
-		attachments: attachments,
-		todoSpinner: todoSpinner,
-		lspStates:   make(map[string]app.LSPClientInfo),
-		mcpStates:   make(map[string]mcp.ClientInfo),
+		com:               com,
+		dialog:            dialog.NewOverlay(),
+		keyMap:            keyMap,
+		textarea:          ta,
+		chat:              ch,
+		header:            header,
+		completions:       comp,
+		attachments:       attachments,
+		todoSpinner:       todoSpinner,
+		lspStates:         make(map[string]app.LSPClientInfo),
+		mcpStates:         make(map[string]mcp.ClientInfo),
+		localUserMessages: make(map[string]int64),
 	}
 
 	status := NewStatus(com, ui)
@@ -338,6 +348,7 @@ func (m *UI) Init() tea.Cmd {
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
+	cmds = append(cmds, m.loadPromptUsage())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
 	return tea.Batch(cmds...)
@@ -472,6 +483,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.draft = ""
 		m.updateCommandSuggestion()
 
+	case promptUsageLoadedMsg:
+		m.localUserMessages = msg.userMessages
+
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
@@ -494,6 +508,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case pubsub.Event[message.Message]:
+		if msg.Payload.Role == message.User {
+			switch msg.Type {
+			case pubsub.CreatedEvent, pubsub.UpdatedEvent:
+				m.localUserMessages[msg.Payload.ID] = msg.Payload.CreatedAt
+			case pubsub.DeletedEvent:
+				delete(m.localUserMessages, msg.Payload.ID)
+			}
+		}
+
 		// Check if this is a child session message for an agent tool.
 		if m.session == nil {
 			break
@@ -745,8 +768,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focus == uiFocusTerminal && m.term != nil {
 			if key.Matches(msg, m.keyMap.Quit) && !m.dialog.ContainsDialog(dialog.QuitID) {
 				if cmd := m.openQuitDialog(); cmd != nil {
-						cmds = append(cmds, cmd)
-					}
+					cmds = append(cmds, cmd)
+				}
 				return m, tea.Batch(cmds...)
 			}
 			// Esc or Ctrl+T exits terminal focus.
@@ -3164,9 +3187,10 @@ func (m *UI) openAgentLibraryDialog() tea.Cmd {
 
 	// Get agents directory path
 	cfg := m.com.Config()
-	agentsDir := filepath.Join(cfg.WorkingDir(), "internal", "agents")
+	localAgentsDir := filepath.Join(cfg.WorkingDir(), "internal", "agents")
+	globalAgentsDir := filepath.Join(home.Dir(), ".floyd", "internal", "agents")
 
-	agentLibraryDialog, err := dialog.NewAgentLibrary(m.com, agentsDir)
+	agentLibraryDialog, err := dialog.NewAgentLibrary(m.com, []string{localAgentsDir, globalAgentsDir})
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -3515,7 +3539,6 @@ func (m *UI) exportSession(sessionID string) tea.Cmd {
 		return util.NewInfoMsg(fmt.Sprintf("Session exported to: %s", filePath))
 	}
 }
-
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
