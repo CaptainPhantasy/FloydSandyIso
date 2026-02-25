@@ -1,7 +1,12 @@
 package model
 
 import (
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -22,6 +27,40 @@ const (
 	leftPadding    = 1
 	rightPadding   = 1
 )
+
+// shadowState represents the shadow daemon state file structure
+type shadowState struct {
+	Status         string `json:"status"`
+	HeartbeatCount int    `json:"heartbeat_count"`
+}
+
+// checkShadowStatus checks if shadow daemon is running for the given project path
+func checkShadowStatus(projectPath string) (bool, int) {
+	// Generate the same hash as the Python daemon: md5(path)[:12]
+	hasher := md5.New()
+	hasher.Write([]byte(projectPath))
+	hash := hex.EncodeToString(hasher.Sum(nil))[:12]
+
+	// Check shadow state file
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false, 0
+	}
+
+	stateFile := filepath.Join(homeDir, ".local", "share", "floyd", "shadow", hash, "state.json")
+
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		return false, 0
+	}
+
+	var state shadowState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return false, 0
+	}
+
+	return state.Status == "running", state.HeartbeatCount
+}
 
 type header struct {
 	// cached logo and compact logo
@@ -108,6 +147,14 @@ func renderHeaderDetails(
 
 	var parts []string
 
+	// Check shadow status
+	cfg := com.Config()
+	shadowActive, heartbeats := checkShadowStatus(cfg.WorkingDir())
+	if shadowActive {
+		shadowIndicator := t.Header.Percentage.Render(fmt.Sprintf("♥%d", heartbeats))
+		parts = append(parts, shadowIndicator)
+	}
+
 	errorCount := 0
 	for l := range lspClients.Seq() {
 		errorCount += l.GetDiagnosticCounts().Error
@@ -140,7 +187,6 @@ func renderHeaderDetails(
 	metadata = dot + metadata
 
 	const dirTrimLimit = 4
-	cfg := com.Config()
 	cwd := fsext.DirTrim(fsext.PrettyPath(cfg.WorkingDir()), dirTrimLimit)
 	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
 	cwd = t.Header.WorkingDir.Render(cwd)

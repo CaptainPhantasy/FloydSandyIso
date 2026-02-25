@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/common"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/logo"
+	uv "github.com/charmbracelet/ultraviolet"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -145,6 +145,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		cwd,
 		"",
 		m.modelInfo(width),
+		"",
+		m.promptQuotaInfo(width),
 		"",
 	}
 
