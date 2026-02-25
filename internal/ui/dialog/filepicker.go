@@ -3,8 +3,11 @@ package dialog
 import (
 	"fmt"
 	"image"
+	_ "image/gif"  // register GIF format
 	_ "image/jpeg" // register JPEG format
 	_ "image/png"  // register PNG format
+	_ "golang.org/x/image/bmp" // register BMP format
+	_ "golang.org/x/image/webp" // register WebP format
 	"os"
 	"strings"
 	"sync"

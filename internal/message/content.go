@@ -86,7 +86,10 @@ type BinaryContent struct {
 
 func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 	base64Encoded := base64.StdEncoding.EncodeToString(bc.Data)
-	if p == catwalk.InferenceProviderOpenAI {
+	// OpenAI-compatible providers need the data: URL format for images
+	// This includes z-ai which uses OpenAI-compatible endpoint
+	providerStr := string(p)
+	if p == catwalk.InferenceProviderOpenAI || providerStr == "z-ai" || providerStr == string(catwalk.InferenceProviderZAI) {
 		return "data:" + bc.MIMEType + ";base64," + base64Encoded
 	}
 	return base64Encoded

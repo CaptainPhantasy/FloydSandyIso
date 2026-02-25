@@ -18,7 +18,7 @@ import (
 const MaxAttachmentSize = int64(5 * 1024 * 1024)
 
 // AllowedImageTypes defines the permitted image file types.
-var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
+var AllowedImageTypes = []string{".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".JPG", ".JPEG", ".PNG", ".WEBP", ".GIF", ".BMP"}
 
 // Common defines common UI options and configurations.
 type Common struct {
