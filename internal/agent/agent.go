@@ -32,7 +32,6 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/hyper"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/tools/mcp"
@@ -42,6 +41,7 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/permission"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/session"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/stringext"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
@@ -51,6 +51,7 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+	zaiConcurrencyCooldown      = 2 * time.Second
 )
 
 //go:embed templates/title.md
@@ -61,6 +62,21 @@ var summaryPrompt []byte
 
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
+
+// --- FLOYD Z.AI 429 GATEWAY SAFEGUARD ---
+// Global concurrency limiter. Restricts Floyd to 1 active LLM request
+// at a time across all tasks and sub-agents to prevent Gateway overload.
+var zaiConcurrencyLimiter = make(chan struct{}, 1)
+
+func withZAIConcurrencyGate[T any](fn func() (T, error)) (T, error) {
+	zaiConcurrencyLimiter <- struct{}{}
+	defer func() {
+		time.Sleep(zaiConcurrencyCooldown)
+		<-zaiConcurrencyLimiter
+	}()
+
+	return fn()
+}
 
 type SessionAgentCall struct {
 	SessionID        string
@@ -264,224 +280,227 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
-	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
-		Files:            files,
-		Messages:         history,
-		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  &call.MaxOutputTokens,
-		TopP:             call.TopP,
-		Temperature:      call.Temperature,
-		PresencePenalty:  call.PresencePenalty,
-		TopK:             call.TopK,
-		FrequencyPenalty: call.FrequencyPenalty,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			for i := range prepared.Messages {
-				prepared.Messages[i].ProviderOptions = nil
-			}
 
-			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
-			a.messageQueue.Del(call.SessionID)
-			for _, queued := range queuedCalls {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
-					return callContext, prepared, createErr
+	result, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+			Files:            files,
+			Messages:         history,
+			ProviderOptions:  call.ProviderOptions,
+			MaxOutputTokens:  &call.MaxOutputTokens,
+			TopP:             call.TopP,
+			Temperature:      call.Temperature,
+			PresencePenalty:  call.PresencePenalty,
+			TopK:             call.TopK,
+			FrequencyPenalty: call.FrequencyPenalty,
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				prepared.Messages = options.Messages
+				for i := range prepared.Messages {
+					prepared.Messages[i].ProviderOptions = nil
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
-			}
 
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+				queuedCalls, _ := a.messageQueue.Get(call.SessionID)
+				a.messageQueue.Del(call.SessionID)
+				for _, queued := range queuedCalls {
+					userMessage, createErr := a.createUserMessage(callContext, queued)
+					if createErr != nil {
+						return callContext, prepared, createErr
+					}
+					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				}
 
-			// Inject dynamic context as first user message (after system messages)
-			// This is the non-cacheable part that changes per-request
-			if dynamicCtx := a.dynamicContext.Get(); dynamicCtx != "" {
-				// Find the first non-system message position
-				insertIdx := 0
+				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+
+				// Inject dynamic context as first user message (after system messages)
+				// This is the non-cacheable part that changes per-request
+				if dynamicCtx := a.dynamicContext.Get(); dynamicCtx != "" {
+					// Find the first non-system message position
+					insertIdx := 0
+					for i, msg := range prepared.Messages {
+						if msg.Role != fantasy.MessageRoleSystem {
+							insertIdx = i
+							break
+						}
+					}
+					// Insert dynamic context as user message WITHOUT cache control
+					dynamicMsg := fantasy.NewUserMessage(dynamicCtx)
+					// Ensure no cache control on this dynamic message
+					dynamicMsg.ProviderOptions = nil
+					prepared.Messages = append(prepared.Messages[:insertIdx], append([]fantasy.Message{dynamicMsg}, prepared.Messages[insertIdx:]...)...)
+				}
+
+				lastSystemRoleInx := 0
+				systemMessageUpdated := false
 				for i, msg := range prepared.Messages {
-					if msg.Role != fantasy.MessageRoleSystem {
-						insertIdx = i
-						break
+					// Only add cache control to the last system message.
+					if msg.Role == fantasy.MessageRoleSystem {
+						lastSystemRoleInx = i
+					} else if !systemMessageUpdated {
+						prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
+						systemMessageUpdated = true
+					}
+					// Then add cache control to the last 2 messages.
+					if i > len(prepared.Messages)-3 {
+						prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 					}
 				}
-				// Insert dynamic context as user message WITHOUT cache control
-				dynamicMsg := fantasy.NewUserMessage(dynamicCtx)
-				// Ensure no cache control on this dynamic message
-				dynamicMsg.ProviderOptions = nil
-				prepared.Messages = append(prepared.Messages[:insertIdx], append([]fantasy.Message{dynamicMsg}, prepared.Messages[insertIdx:]...)...)
-			}
 
-			lastSystemRoleInx := 0
-			systemMessageUpdated := false
-			for i, msg := range prepared.Messages {
-				// Only add cache control to the last system message.
-				if msg.Role == fantasy.MessageRoleSystem {
-					lastSystemRoleInx = i
-				} else if !systemMessageUpdated {
-					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
-					systemMessageUpdated = true
+				if promptPrefix != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 				}
-				// Then add cache control to the last 2 messages.
-				if i > len(prepared.Messages)-3 {
-					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
-				}
-			}
 
-			if promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
-			}
-
-			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    largeModel.ModelCfg.Model,
-				Provider: largeModel.ModelCfg.Provider,
-			})
-			if err != nil {
-				return callContext, prepared, err
-			}
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
-
-			// Inject progress callback into context for tools to emit progress events
-			if a.progressCallback != nil {
-				callContext = context.WithValue(callContext, tools.ProgressCallbackContextKey, func(event tools.ToolProgressEvent) {
-					// Note: Tool call ID will be set by the tool using its params.ID
-					// This callback is called from tools that have access to tool call ID
-					if a.progressCallback != nil {
-						// The tool should use the package-level callback with tool call ID
-						// This is a fallback for tools that don't have tool call ID
-						slog.Debug("Progress callback invoked without tool call ID", "message", event.Message, "percent", event.Percent)
-					}
+				var assistantMsg message.Message
+				assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+					Role:     message.Assistant,
+					Parts:    []message.ContentPart{},
+					Model:    largeModel.ModelCfg.Model,
+					Provider: largeModel.ModelCfg.Provider,
 				})
-			}
+				if err != nil {
+					return callContext, prepared, err
+				}
+				callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
+				callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
+				callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 
-			currentAssistant = &assistantMsg
-			return callContext, prepared, err
-		},
-		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
-			currentAssistant.AppendReasoningContent(reasoning.Text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			currentAssistant.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// handle anthropic signature
-			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
-				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
-					currentAssistant.AppendReasoningSignature(reasoning.Signature)
+				// Inject progress callback into context for tools to emit progress events
+				if a.progressCallback != nil {
+					callContext = context.WithValue(callContext, tools.ProgressCallbackContextKey, func(event tools.ToolProgressEvent) {
+						// Note: Tool call ID will be set by the tool using its params.ID
+						// This callback is called from tools that have access to tool call ID
+						if a.progressCallback != nil {
+							// The tool should use the package-level callback with tool call ID
+							// This is a fallback for tools that don't have tool call ID
+							slog.Debug("Progress callback invoked without tool call ID", "message", event.Message, "percent", event.Percent)
+						}
+					})
 				}
-			}
-			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
-				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
-					currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
-				}
-			}
-			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
-				if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
-					currentAssistant.SetReasoningResponsesData(reasoning)
-				}
-			}
-			currentAssistant.FinishThinking()
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnTextDelta: func(id string, text string) error {
-			// Strip leading newline from initial text content. This is is
-			// particularly important in non-interactive mode where leading
-			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 {
-				text = strings.TrimPrefix(text, "\n")
-			}
 
-			currentAssistant.AppendContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnToolInputStart: func(id string, toolName string) error {
-			toolCall := message.ToolCall{
-				ID:               id,
-				Name:             toolName,
-				ProviderExecuted: false,
-				Finished:         false,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
-		},
-		OnToolCall: func(tc fantasy.ToolCallContent) error {
-			toolCall := message.ToolCall{
-				ID:               tc.ToolCallID,
-				Name:             tc.ToolName,
-				Input:            tc.Input,
-				ProviderExecuted: false,
-				Finished:         true,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnToolResult: func(result fantasy.ToolResultContent) error {
-			toolResult := a.convertToToolResult(result)
-			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
-			})
-			return createMsgErr
-		},
-		OnStepFinish: func(stepResult fantasy.StepResult) error {
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
-			}
-			currentAssistant.AddFinish(finishReason, "", "")
-			sessionLock.Lock()
-			defer sessionLock.Unlock()
-
-			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
-			if getSessionErr != nil {
-				return getSessionErr
-			}
-			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
-			if sessionErr != nil {
-				return sessionErr
-			}
-			currentSession = updatedSession
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
-				// Use override context window if set, otherwise use catwalk's value
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				if largeModel.ModelCfg.ContextWindow > 0 {
-					cw = largeModel.ModelCfg.ContextWindow
-				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
-				var threshold int64
-				if cw >= largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					return true
-				}
-				return false
+				currentAssistant = &assistantMsg
+				return callContext, prepared, err
 			},
-		},
+			OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
+				currentAssistant.AppendReasoningContent(reasoning.Text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				currentAssistant.AppendReasoningContent(text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				// handle anthropic signature
+				if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
+					if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
+						currentAssistant.AppendReasoningSignature(reasoning.Signature)
+					}
+				}
+				if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
+					if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
+						currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+					}
+				}
+				if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
+					if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
+						currentAssistant.SetReasoningResponsesData(reasoning)
+					}
+				}
+				currentAssistant.FinishThinking()
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnTextDelta: func(id string, text string) error {
+				// Strip leading newline from initial text content. This is is
+				// particularly important in non-interactive mode where leading
+				// newlines are very visible.
+				if len(currentAssistant.Parts) == 0 {
+					text = strings.TrimPrefix(text, "\n")
+				}
+
+				currentAssistant.AppendContent(text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnToolInputStart: func(id string, toolName string) error {
+				toolCall := message.ToolCall{
+					ID:               id,
+					Name:             toolName,
+					ProviderExecuted: false,
+					Finished:         false,
+				}
+				currentAssistant.AddToolCall(toolCall)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
+				// TODO: implement
+			},
+			OnToolCall: func(tc fantasy.ToolCallContent) error {
+				toolCall := message.ToolCall{
+					ID:               tc.ToolCallID,
+					Name:             tc.ToolName,
+					Input:            tc.Input,
+					ProviderExecuted: false,
+					Finished:         true,
+				}
+				currentAssistant.AddToolCall(toolCall)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnToolResult: func(result fantasy.ToolResultContent) error {
+				toolResult := a.convertToToolResult(result)
+				_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
+					Role: message.Tool,
+					Parts: []message.ContentPart{
+						toolResult,
+					},
+				})
+				return createMsgErr
+			},
+			OnStepFinish: func(stepResult fantasy.StepResult) error {
+				finishReason := message.FinishReasonUnknown
+				switch stepResult.FinishReason {
+				case fantasy.FinishReasonLength:
+					finishReason = message.FinishReasonMaxTokens
+				case fantasy.FinishReasonStop:
+					finishReason = message.FinishReasonEndTurn
+				case fantasy.FinishReasonToolCalls:
+					finishReason = message.FinishReasonToolUse
+				}
+				currentAssistant.AddFinish(finishReason, "", "")
+				sessionLock.Lock()
+				defer sessionLock.Unlock()
+
+				updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
+				if getSessionErr != nil {
+					return getSessionErr
+				}
+				a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+				_, sessionErr := a.sessions.Save(ctx, updatedSession)
+				if sessionErr != nil {
+					return sessionErr
+				}
+				currentSession = updatedSession
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			StopWhen: []fantasy.StopCondition{
+				func(_ []fantasy.StepResult) bool {
+					// Use override context window if set, otherwise use catwalk's value
+					cw := int64(largeModel.CatwalkCfg.ContextWindow)
+					if largeModel.ModelCfg.ContextWindow > 0 {
+						cw = largeModel.ModelCfg.ContextWindow
+					}
+					tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+					remaining := cw - tokens
+					var threshold int64
+					if cw >= largeContextWindowThreshold {
+						threshold = largeContextWindowBuffer
+					} else {
+						threshold = int64(float64(cw) * smallContextWindowRatio)
+					}
+					if (remaining <= threshold) && !a.disableAutoSummarize {
+						shouldSummarize = true
+						return true
+					}
+					return false
+				},
+			},
+		})
 	})
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
@@ -666,35 +685,37 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildTieredSummaryPrompt(currentSession.Todos, tc)
 
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          summaryPromptText,
-		Messages:        aiMsgs,
-		ProviderOptions: opts,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// Handle anthropic signature.
-			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-					summaryMessage.AppendReasoningSignature(signature.Signature)
+	resp, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:          summaryPromptText,
+			Messages:        aiMsgs,
+			ProviderOptions: opts,
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				prepared.Messages = options.Messages
+				if systemPromptPrefix != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 				}
-			}
-			summaryMessage.FinishThinking()
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
-		},
+				return callContext, prepared, nil
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				summaryMessage.AppendReasoningContent(text)
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				// Handle anthropic signature.
+				if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
+					if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
+						summaryMessage.AppendReasoningSignature(signature.Signature)
+					}
+				}
+				summaryMessage.FinishThinking()
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnTextDelta: func(id, text string) error {
+				summaryMessage.AppendContent(text)
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+		})
 	})
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
@@ -773,10 +794,12 @@ func (a *sessionAgent) SuggestFollowup(ctx context.Context, sessionID string) (s
 	)
 
 	var maxTokens int64 = 50
-	resp, err := agent.Generate(ctx, fantasy.AgentCall{
-		Prompt:          "What should the user ask or do next?",
-		Messages:        aiMsgs,
-		MaxOutputTokens: &maxTokens,
+	resp, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+		return agent.Generate(ctx, fantasy.AgentCall{
+			Prompt:          "What should the user ask or do next?",
+			Messages:        aiMsgs,
+			MaxOutputTokens: &maxTokens,
+		})
 	})
 
 	if err != nil {
@@ -930,7 +953,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Use the small model to generate the title.
 	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	resp, err := agent.Stream(ctx, streamCall)
+	resp, err := withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+		return agent.Stream(ctx, streamCall)
+	})
 	if err == nil {
 		// We successfully generated a title with the small model.
 		slog.Debug("Generated title with small model")
@@ -939,7 +964,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
-		resp, err = agent.Stream(ctx, streamCall)
+		resp, err = withZAIConcurrencyGate(func() (*fantasy.AgentResult, error) {
+			return agent.Stream(ctx, streamCall)
+		})
 		if err == nil {
 			slog.Debug("Generated title with large model")
 		} else {
@@ -1178,7 +1205,7 @@ func (a *sessionAgent) emitProgress(toolCallID string, event tools.ToolProgressE
 		Status:     event.Status,
 		Message:    event.Message,
 		Percent:    event.Percent,
-		Timestamp:   event.Timestamp,
+		Timestamp:  event.Timestamp,
 	}
 
 	slog.Debug("Emitting tool progress event",
