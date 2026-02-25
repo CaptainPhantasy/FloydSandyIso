@@ -38,8 +38,9 @@ func (m *UI) startPromptUsageRefreshTicker() tea.Cmd {
 }
 
 func (m *UI) localPromptUsageCounts(now time.Time) (fiveHour, sevenDay int) {
-	sevenDayCutoff := now.Add(-7 * 24 * time.Hour).Unix()
-	fiveHourCutoff := now.Add(-5 * time.Hour).Unix()
+	// Database stores timestamps in milliseconds, so use UnixMilli
+	sevenDayCutoff := now.Add(-7 * 24 * time.Hour).UnixMilli()
+	fiveHourCutoff := now.Add(-5 * time.Hour).UnixMilli()
 
 	for id, ts := range m.localUserMessages {
 		if ts < sevenDayCutoff {
