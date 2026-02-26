@@ -109,7 +109,7 @@ func withRateLimitGate[T any](cfg rateLimitConfig, provider string, fn func() (T
 func withConcurrencyGate[T any](cooldown time.Duration, fn func() (T, error)) (T, error) {
 	globalConcurrencyLimiter <- struct{}{}
 	defer func() {
-		time.Sleep(cooldown)
+		time.Sleep(cooldown / 4)
 		<-globalConcurrencyLimiter
 	}()
 

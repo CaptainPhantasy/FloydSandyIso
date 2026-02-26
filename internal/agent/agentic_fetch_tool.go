@@ -199,7 +199,11 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				maxTokens = small.ModelCfg.MaxTokens
 			}
 
-			result, err := agent.Run(ctx, SessionAgentCall{
+			// Create a timeout context for the sub-agent to prevent hanging
+			subCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			defer cancel()
+
+			result, err := agent.Run(subCtx, SessionAgentCall{
 				SessionID:        session.ID,
 				Prompt:           fullPrompt,
 				MaxOutputTokens:  maxTokens,

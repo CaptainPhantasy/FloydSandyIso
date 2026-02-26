@@ -52,7 +52,11 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, ma
 
 	searchURL := "https://lite.duckduckgo.com/lite/?q=" + url.QueryEscape(query)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	// Create a timeout context for search to prevent hanging
+	searchCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(searchCtx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

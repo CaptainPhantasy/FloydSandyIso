@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
@@ -23,7 +24,11 @@ var multipleNewlinesRe = regexp.MustCompile(`\n{3,}`)
 
 // FetchURLAndConvert fetches a URL and converts HTML content to markdown.
 func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Create a timeout context for fetch operations to prevent hanging
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(fetchCtx, "GET", url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
