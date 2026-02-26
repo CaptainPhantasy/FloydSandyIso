@@ -1315,6 +1315,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.textarea.Focus()
 		m.dialog.CloseDialog(dialog.AgentLibraryID)
 		cmds = append(cmds, util.ReportInfo("Agent selected: "+msg.AgentName+" - Press Enter to send"))
+	case dialog.ActionSelectSkill:
+		// Populate textarea with skill content
+		m.textarea.SetValue(msg.SkillContent)
+		m.textarea.Focus()
+		m.dialog.CloseDialog(dialog.SkillsLibraryID)
+		cmds = append(cmds, util.ReportInfo("Skill selected: "+msg.SkillName+" - Press Enter to send"))
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3110,6 +3116,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openAgentLibraryDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SkillsLibraryID:
+		if cmd := m.openSkillsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -3207,6 +3217,25 @@ func (m *UI) openAgentLibraryDialog() tea.Cmd {
 		return util.ReportError(err)
 	}
 	m.dialog.OpenDialog(agentLibraryDialog)
+	return nil
+}
+
+// openSkillsDialog opens the skills library dialog.
+func (m *UI) openSkillsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SkillsLibraryID) {
+		// Bring to front
+		m.dialog.BringToFront(dialog.SkillsLibraryID)
+		return nil
+	}
+
+	// Get skills directory path (uses ~/.config/floyd/skills)
+	skillsDir := filepath.Join(home.Dir(), ".config", "floyd", "skills")
+
+	skillsLibraryDialog, err := dialog.NewSkillsLibrary(m.com, skillsDir)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(skillsLibraryDialog)
 	return nil
 }
 

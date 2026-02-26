@@ -101,6 +101,13 @@ type (
 		AgentDescription string
 		SystemPrompt     string
 	}
+	// ActionSelectSkill is a message indicating a skill has been selected from the library.
+	ActionSelectSkill struct {
+		SkillName        string
+		SkillDescription string
+		SkillContent     string
+		SkillCategory    string
+	}
 )
 
 // Messages for API key input dialog.
