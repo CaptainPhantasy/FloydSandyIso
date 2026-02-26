@@ -20,3 +20,8 @@ floyd
 *.local.md
 floyd.json
 floyd-sandy-iso
+
+# Binary builds
+floyd4
+FloydSandyIso
+floyd-sandy-iso
