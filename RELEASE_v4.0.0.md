@@ -455,4 +455,23 @@ cp /Volumes/Storage/.floyd/floyd.db /Volumes/Storage/.floyd/floyd.db.backup-$(da
 
 ---
 
+## Behavioral Changes (Protocol Update)
+
+Effective: 2026-02-27 09:51:26 UTC
+
+- SUPERCACHE Access Rule (Mandatory):
+  - Use MCP stdio tools for SUPERCACHE (cache_retrieve/cache_store/...)
+  - Do NOT use HTTP /supercache/* routes for core operations; HTTP is diagnostic-only (GET /health allowed)
+  - Prefer global keys over project-tier stubs when both exist (e.g., global:system:project_registry, global:system:directive_llm_optimization)
+- Rationale: Prevent endpoint drift and sidecar variance from impacting core behavior.
+- Documentation: See docs/SUPERCACHE_ACCESS_METHOD.md
+
+---
+
+### H) Protocol Hardening (Deterministic Edition)
+
+- Root protocol (FLOYD.md) upgraded to Deterministic Edition v4.0: policy precedence (STOP > Bans > Debug Gates > Rate Limits > SUPERCACHE > Action Bias), MCP-stdio-only SUPERCACHE access (HTTP /supercache/* forbidden), deterministic Mode Selector, Debug Hard-Gates (Hypothesis Gate, Two‑Failure Reset, Prediction Rule), Error Repetition Circuit Breaker, Discovery Gate for all modifying actions, Degraded Mode Playbook, and Shadow/Handoff protocol.
+- System templates synchronized: internal/agent/templates/floyd_protocol.md.tpl and coder.md.tpl mirror root protocol (4-line Boot Summary, STOP precedence, Dual‑Switch agentic_fetch revocation).
+- SUPERCACHE policy seeds prepared (global:system:*). Use tools/seed-supercache-policies.js to seed via MCP stdio.
+
 *Documentation generated for Floyd v4.0.0 release*

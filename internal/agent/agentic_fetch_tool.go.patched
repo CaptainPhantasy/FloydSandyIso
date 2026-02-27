@@ -1,0 +1,5 @@
+// Add timeout context for sub-agent
+subCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+defer cancel()
+
+result, err := agent.Run(subCtx, SessionAgentCall{

@@ -55,6 +55,12 @@ ls: /nonexistent/path: No such file or directory
 
 ---
 
+## BOOT LOG
+
+- 2026-02-27 09:51:26 UTC — Shadow daemon started (PID 62593) for project /Volumes/Storage/floyd-sandbox/FloydDeployable
+
+---
+
 ## PREVIOUSLY COMPLETED
 
 *Historical completions*

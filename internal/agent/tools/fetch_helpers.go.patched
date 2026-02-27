@@ -1,0 +1,5 @@
+// Create a timeout context for fetch operations
+fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+defer cancel()
+
+req, err := http.NewRequestWithContext(fetchCtx, "GET", url, nil)
