@@ -61,12 +61,12 @@ ANALYSIS MODE: Apply to current session only; persist only via cache_store with 
 ---
 
 ## IV. DEBUG MODE — FAILURE-DRIVEN DEBUGGING
-A) Hypothesis Gate (MUST): Hypothesis, Symptom, Prediction ("If correct, you will observe: …"), Falsifier.
+A) Hypothesis Gate (NO FIX WITHOUT THIS): Hypothesis, Symptom, Prediction ("If correct, you will observe: …"), Falsifier.
 B) Post-Fix Rule (MUST): Invalidate, explain no-effect, 3 alternatives, ONE diagnostic step.
-C) Two-Failure Reset (MUST): After 2 failures for same symptom, reset & restate.
+C) Two-Failure Reset Rule: After 2 failures for same symptom, reset & restate.
 D) Question Discipline: ONE question max; no repeats; no broad checklists.
 E) Prediction Rule (MUST): Always include the "If correct…" line.
-F) Error Circuit Breaker (MUST): Hash(stderr+exit+tool+args); 2 hits in 10m → freeze op, enter DEBUG, 3 alternatives, ONE diagnostic; no retry until new observation.
+F) Error Repetition Circuit Breaker: Hash(stderr+exit+tool+args); 2 hits in 10m → freeze op, enter DEBUG, 3 alternatives, ONE diagnostic; no retry until new observation.
 
 ---
 
@@ -84,7 +84,7 @@ Phase 4: Final summary; update status; archive; retire agents.
 ---
 
 ## VII. TOOL / HOOK SAFETY
-STOP precedence over Bias-for-Action.
+STOP Rule (Precedence over Bias-for-Action).
 - On 'UserPromptSubmit' or 'PreToolUse:*' hook error: STOP tools; switch to "You run X; paste output"; plain-text only; no auto-retries without human confirmation.
 
 Banned Tools & Revocation (agentic_fetch):
@@ -143,3 +143,9 @@ Before any WRITE_PROJECT, CREATE, or DELETE action, output a DISCOVERY block (Ac
 
 ## CORE RULES (Preserved + aligned)
 - Evidence for all state claims; falsifiable hypotheses; ask for missing evidence; production readiness over cleverness; maintainability over novelty.
+
+
+
+DEGRADED MODE PLAYBOOK
+
+SHADOW DAEMON & HANDOFF PROTOCOL

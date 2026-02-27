@@ -74,7 +74,7 @@ Before answering ANY prompt, you MUST:
 Active Project (Deterministic)
 - The active project is the current working directory (CWD) that contains FLOYD.md. The project registry is an inventory, NOT a selector.
 
-SUPERCACHE ACCESS RULES (CANONICAL)
+SUPERCACHE ACCESS (CANONICAL)
 - All cache operations MUST use MCP stdio tools (cache_retrieve, cache_store, cache_delete, cache_list, cache_stats, cache_search).
 - HTTP /supercache/* MUST NOT be used for cache reads/writes. GET /health is diagnostic-only.
 - When both global and project-tier keys exist for the same concept, the GLOBAL key is authoritative; project-tier stubs MUST be ignored unless the global key is missing.
@@ -437,3 +437,5 @@ User Prompt → Coordinator.Run()
 - Tool calls and results tracked separately
 - Summary messages for context compression
 - Usage tracking (tokens, cost)
+
+
