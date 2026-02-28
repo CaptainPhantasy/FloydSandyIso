@@ -36,16 +36,7 @@ func DefaultChangelog() *Changelog {
 		LastUpdated:    now,
 		Categories:     []string{"agent", "tools", "ui", "performance", "safety"},
 		Entries: []ChangelogEntry{
-			// === v4.7 (In Development) ===
-			{
-				Version:     "v4.7",
-				Type:        "feature",
-				Title:       "Sidebar Stoplight Indicator",
-				Description: "Context-aware color indicator in sidebar: GREEN (0-70%), YELLOW (71-84%), RED (85%+). Visual warning before auto-export triggers.",
-				Category:    "ui",
-				Date:        "2026-02-28",
-				RelatedDocs: []string{"contextsidebarfinal.md"},
-			},
+			// === v4.7 (Planned) ===
 			{
 				Version:     "v4.7",
 				Type:        "feature",
@@ -72,6 +63,16 @@ func DefaultChangelog() *Changelog {
 				Category:    "tools",
 				Date:        "2026-02-28",
 				RelatedDocs: []string{"internal/agent/tools/archive.go"},
+			},
+			// === v4.6.1 ===
+			{
+				Version:     "v4.6.1",
+				Type:        "feature",
+				Title:       "Sidebar Stoplight Indicator",
+				Description: "Context-aware color indicator: 🟢 GREEN (0-70%), 🟡 YELLOW (71-84%), 🔴 RED (85%+). Compact format with bullet separators and warning line at critical threshold.",
+				Category:    "ui",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"contextsidebarfinal.md"},
 			},
 			// === v4.6 ===
 			{
