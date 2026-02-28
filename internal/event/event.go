@@ -1,129 +1,72 @@
 package event
 
+// Telemetry is disabled for this isolated instance.
+// All functions are no-ops to eliminate telemetry overhead while maintaining API compatibility.
+
 import (
-	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
-	"reflect"
-	"runtime"
 	"time"
-
-	"github.com/CaptainPhantasy/FloydSandyIso/internal/version"
-	"github.com/posthog/posthog-go"
-)
-
-const (
-	endpoint = "" // Disabled for isolated instance
-	key      = "" // Disabled for isolated instance
-
-	nonInteractiveEventName = "NonInteractive"
 )
 
 var (
-	client posthog.Client
-
-	baseProps = posthog.NewProperties().
-			Set("GOOS", runtime.GOOS).
-			Set("GOARCH", runtime.GOARCH).
-			Set("TERM", os.Getenv("TERM")).
-			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
-			Set("Version", version.Version).
-			Set("GoVersion", runtime.Version()).
-			Set(nonInteractiveEventName, false)
+	distinctId  = "local"
+	appStartTime time.Time
 )
 
-func SetNonInteractive(nonInteractive bool) {
-	baseProps = baseProps.Set(nonInteractiveEventName, nonInteractive)
-}
-
-func Init() {
-	c, err := posthog.NewWithConfig(key, posthog.Config{
-		Endpoint:        endpoint,
-		Logger:          logger{},
-		ShutdownTimeout: 500 * time.Millisecond,
-	})
-	if err != nil {
-		slog.Error("Failed to initialize PostHog client", "error", err)
-	}
-	client = c
-	distinctId = getDistinctId()
-}
-
+// GetID returns a local identifier (no telemetry).
 func GetID() string { return distinctId }
 
-func Alias(userID string) {
-	if client == nil || distinctId == fallbackId || distinctId == "" || userID == "" {
-		return
-	}
-	if err := client.Enqueue(posthog.Alias{
-		DistinctId: distinctId,
-		Alias:      userID,
-	}); err != nil {
-		slog.Error("Failed to enqueue PostHog alias event", "error", err)
-		return
-	}
-	slog.Info("Aliased in PostHog", "machine_id", distinctId, "user_id", userID)
+// Init is a no-op.
+func Init() {}
+
+// SetNonInteractive is a no-op.
+func SetNonInteractive(_ bool) {}
+
+// Flush is a no-op.
+func Flush() {}
+
+// Alias is a no-op.
+func Alias(_ string) {}
+
+// Error is a no-op.
+func Error(_ any, _ ...any) {}
+
+// send is a no-op (internal).
+func send(_ string, _ ...any) {}
+
+// AppInitialized records app start time locally (no telemetry).
+func AppInitialized() {
+	appStartTime = time.Now()
 }
 
-// send logs an event to PostHog with the given event name and properties.
-func send(event string, props ...any) {
-	if client == nil {
-		return
-	}
-	err := client.Enqueue(posthog.Capture{
-		DistinctId: distinctId,
-		Event:      event,
-		Properties: pairsToProps(props...).Merge(baseProps),
-	})
-	if err != nil {
-		slog.Error("Failed to enqueue PostHog event", "event", event, "props", props, "error", err)
-		return
-	}
-}
+// AppExited is a no-op.
+func AppExited() {}
 
-// Error logs an error event to PostHog with the error type and message.
-func Error(errToLog any, props ...any) {
-	if client == nil {
-		return
-	}
-	posthogErr := client.Enqueue(posthog.NewDefaultException(
-		time.Now(),
-		distinctId,
-		reflect.TypeOf(errToLog).String(),
-		fmt.Sprintf("%v", errToLog),
-	))
-	if posthogErr != nil {
-		slog.Error("Failed to enqueue PostHog error", "err", errToLog, "props", props, "posthogErr", posthogErr)
-		return
-	}
-}
+// SessionCreated is a no-op.
+func SessionCreated() {}
 
-func Flush() {
-	if client == nil {
-		return
-	}
-	if err := client.Close(); err != nil {
-		slog.Error("Failed to flush PostHog events", "error", err)
-	}
-}
+// SessionDeleted is a no-op.
+func SessionDeleted() {}
 
-func pairsToProps(props ...any) posthog.Properties {
-	p := posthog.NewProperties()
+// SessionSwitched is a no-op.
+func SessionSwitched() {}
 
-	if !isEven(len(props)) {
-		slog.Error("Event properties must be provided as key-value pairs", "props", props)
-		return p
-	}
+// FilePickerOpened is a no-op.
+func FilePickerOpened() {}
 
-	for i := 0; i < len(props); i += 2 {
-		key := props[i].(string)
-		value := props[i+1]
-		p = p.Set(key, value)
-	}
-	return p
-}
+// LSPStarted is a no-op.
+func LSPStarted(_ string) {}
 
-func isEven(n int) bool {
-	return n%2 == 0
-}
+// LSPRestarted is a no-op.
+func LSPRestarted(_ string) {}
+
+// MCPStarted is a no-op.
+func MCPStarted(_ string) {}
+
+// PromptSent is a no-op.
+func PromptSent(_ ...any) {}
+
+// PromptResponded is a no-op.
+func PromptResponded(_ ...any) {}
+
+// TokensUsed is a no-op.
+func TokensUsed(_ ...any) {}

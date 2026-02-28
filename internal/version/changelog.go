@@ -28,7 +28,7 @@ type Changelog struct {
 	Categories     []string         `json:"categories"`
 }
 
-// DefaultChangelog returns the default changelog with known V4.0 features.
+// DefaultChangelog returns the default changelog with known V4.x features.
 func DefaultChangelog() *Changelog {
 	now := time.Now().Format("2006-01-02")
 	return &Changelog{
@@ -36,14 +36,118 @@ func DefaultChangelog() *Changelog {
 		LastUpdated:    now,
 		Categories:     []string{"agent", "tools", "ui", "performance", "safety"},
 		Entries: []ChangelogEntry{
+			// === v4.7 (In Development) ===
+			{
+				Version:     "v4.7",
+				Type:        "feature",
+				Title:       "Sidebar Stoplight Indicator",
+				Description: "Context-aware color indicator in sidebar: GREEN (0-70%), YELLOW (71-84%), RED (85%+). Visual warning before auto-export triggers.",
+				Category:    "ui",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"contextsidebarfinal.md"},
+			},
+			{
+				Version:     "v4.7",
+				Type:        "feature",
+				Title:       "Session Auto-Export",
+				Description: "Automatic transcript export at 85% context threshold. Saves to .floyd/transcripts/ with full message history, tool executions, and decisions.",
+				Category:    "agent",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"contextsidebarfinal.md"},
+			},
+			{
+				Version:     "v4.7",
+				Type:        "feature",
+				Title:       "Session Handoff System",
+				Description: "HANDOFF.md auto-generated on export. New sessions detect prior session and can query archive tool for context recovery without loading full transcript.",
+				Category:    "agent",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"contextsidebarfinal.md"},
+			},
+			{
+				Version:     "v4.7",
+				Type:        "feature",
+				Title:       "Semantic Archive Tool",
+				Description: "query_floyd_archive tool searches past sessions with semantic firewall - only indexes tool executions and code, not conversational text. Prevents persona drift.",
+				Category:    "tools",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"internal/agent/tools/archive.go"},
+			},
+			// === v4.6 ===
+			{
+				Version:     "v4.6",
+				Type:        "feature",
+				Title:       "Dual Token Display",
+				Description: "Sidebar now shows both total tokens (raw context pressure) and effective tokens (after cache subtraction). Format: '85K total / 42K effective, 50% cached'.",
+				Category:    "ui",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"sidebarfixes.md"},
+			},
+			{
+				Version:     "v4.6",
+				Type:        "improvement",
+				Title:       "Conservative Warning Thresholds",
+				Description: "Context warnings now based on TOTAL tokens (not effective), providing conservative alerts at 80% threshold.",
+				Category:    "safety",
+				Date:        "2026-02-28",
+			},
 			{
 				Version:     "v4.6",
 				Type:        "feature",
 				Title:       "Forced MCP Tool Discovery",
-				Description: "Agent now probes ALL running MCP servers at boot via stdin JSON-RPC, regardless of floyd.json config or tool schema visibility. 94+ tools across 13 servers are forced into awareness. Eliminates 'I don't have that tool' assumptions.",
+				Description: "Agent now probes ALL running MCP servers at boot via stdin JSON-RPC, regardless of floyd.json config or tool schema visibility. 94+ tools across 13 servers are forced into awareness.",
 				Category:    "agent",
 				Date:        "2026-02-28",
 				RelatedDocs: []string{"internal/agent/templates/floyd_protocol.md.tpl"},
+			},
+			{
+				Version:     "v4.6",
+				Type:        "improvement",
+				Title:       "MCP Section Removed from Sidebar",
+				Description: "Sidebar no longer displays MCP section - tools are auto-discovered at boot, making the display redundant and saving vertical space.",
+				Category:    "ui",
+				Date:        "2026-02-28",
+			},
+			{
+				Version:     "v4.6",
+				Type:        "improvement",
+				Title:       "Telemetry Stubbed",
+				Description: "All telemetry (PostHog) functions converted to no-ops for complete independence from upstream. No data collection.",
+				Category:    "safety",
+				Date:        "2026-02-28",
+			},
+			{
+				Version:     "v4.6",
+				Type:        "fix",
+				Title:       "Prompt Quota Timestamp Fix",
+				Description: "Fixed timestamp comparison bug where prompt quota never updated. Database stores seconds, comparison was using milliseconds.",
+				Category:    "fix",
+				Date:        "2026-02-28",
+			},
+			{
+				Version:     "v4.6",
+				Type:        "fix",
+				Title:       "DB Migration Order Fix",
+				Description: "Fixed ensureColumns() running before migrations, causing 'column not found' errors on fresh databases. Now runs after goose.Up().",
+				Category:    "fix",
+				Date:        "2026-02-28",
+			},
+			// === v4.0.0 - v4.5 ===
+			{
+				Version:     "v4.5",
+				Type:        "improvement",
+				Title:       "Context Caching Display",
+				Description: "Added CacheReadTokens tracking and display. Shows what percentage of context was served from cache.",
+				Category:    "ui",
+				Date:        "2026-02-27",
+			},
+			{
+				Version:     "v4.5",
+				Type:        "improvement",
+				Title:       "Error Preservation in Prompt Usage",
+				Description: "Prompt usage loader now preserves existing data on database errors instead of wiping to empty.",
+				Category:    "fix",
+				Date:        "2026-02-27",
 			},
 			{
 				Version:     "v4.0.0",

@@ -16,9 +16,11 @@ type ContextStatusResponse struct {
 	PromptTokens     int64   `json:"prompt_tokens"`
 	CompletionTokens int64   `json:"completion_tokens"`
 	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`       // prompt + completion
 	EffectiveTokens  int64   `json:"effective_tokens"`  // prompt + completion - cached
+	CachePercent     float64 `json:"cache_percent"`     // what % was served from cache
 	ContextWindow    int64   `json:"context_window"`
-	PercentUsed      float64 `json:"percent_used"`
+	PercentUsed      float64 `json:"percent_used"`      // based on TOTAL (conservative)
 	RemainingTokens  int64   `json:"remaining_tokens"`
 	ShouldSummarize  bool    `json:"should_summarize"`  // approaching limit
 	SessionID        string  `json:"session_id"`
@@ -34,26 +36,39 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 				return fantasy.NewTextErrorResponse("no active session"), nil
 			}
 
-			sess, err := sessions.Get(ctx, sessionID)
+		sess, err := sessions.Get(ctx, sessionID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get session: %v", err)), nil
 			}
 
-			effectiveTokens := sess.PromptTokens + sess.CompletionTokens - sess.CacheReadTokens
-			remaining := contextWindow - effectiveTokens
-			percentUsed := 0.0
-			if contextWindow > 0 {
-				percentUsed = (float64(effectiveTokens) / float64(contextWindow)) * 100
+			// Calculate both total and effective tokens
+			totalTokens := sess.PromptTokens + sess.CompletionTokens
+			effectiveTokens := totalTokens - sess.CacheReadTokens
+
+			// Calculate cache percentage
+			cachePercent := 0.0
+			if totalTokens > 0 {
+				cachePercent = (float64(sess.CacheReadTokens) / float64(totalTokens)) * 100
 			}
 
-			// Warn if approaching limit (80%+)
+			// Use TOTAL for percentage (conservative - shows actual context pressure)
+			percentUsed := 0.0
+			if contextWindow > 0 {
+				percentUsed = (float64(totalTokens) / float64(contextWindow)) * 100
+			}
+
+			remaining := contextWindow - totalTokens
+
+			// Warn if approaching limit (80%+ of TOTAL)
 			shouldSummarize := percentUsed >= 80.0
 
 			status := ContextStatusResponse{
 				PromptTokens:     sess.PromptTokens,
 				CompletionTokens: sess.CompletionTokens,
 				CacheReadTokens:  sess.CacheReadTokens,
+				TotalTokens:      totalTokens,
 				EffectiveTokens:  effectiveTokens,
+				CachePercent:     cachePercent,
 				ContextWindow:    contextWindow,
 				PercentUsed:      percentUsed,
 				RemainingTokens:  remaining,
@@ -61,21 +76,26 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 				SessionID:        sessionID,
 			}
 
-			// Human-readable summary
+			// Human-readable summary with dual display
 			var summary string
 			if shouldSummarize {
 				summary = fmt.Sprintf(
-					"⚠️ CONTEXT WARNING: %.1f%% used (%d/%d tokens). %d remaining. Consider being more concise.\n"+
-					"Cached: %d tokens | Prompt: %d | Completion: %d",
-					percentUsed, effectiveTokens, contextWindow, remaining,
-					sess.CacheReadTokens, sess.PromptTokens, sess.CompletionTokens,
+					"⚠️ CONTEXT WARNING: %.1f%% of window used\n"+
+						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
+						"  Remaining: %d tokens | Window: %d\n"+
+						"  Consider being more concise or requesting summarization.",
+					percentUsed,
+					totalTokens, effectiveTokens, cachePercent,
+					remaining, contextWindow,
 				)
 			} else {
 				summary = fmt.Sprintf(
-					"Context: %.1f%% used (%d/%d tokens). %d remaining.\n"+
-					"Cached: %d tokens | Prompt: %d | Completion: %d",
-					percentUsed, effectiveTokens, contextWindow, remaining,
-					sess.CacheReadTokens, sess.PromptTokens, sess.CompletionTokens,
+					"Context: %.1f%% used\n"+
+						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
+						"  Remaining: %d tokens | Window: %d",
+					percentUsed,
+					totalTokens, effectiveTokens, cachePercent,
+					remaining, contextWindow,
 				)
 			}
 

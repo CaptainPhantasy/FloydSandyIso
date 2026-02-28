@@ -21,9 +21,12 @@ func PrettyPath(t *styles.Styles, path string, width int) string {
 
 // ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
-	ContextUsed  int64
-	ModelContext int64
-	Cost         float64
+	TotalTokens     int64   // Raw total (PromptTokens + CompletionTokens)
+	EffectiveTokens int64   // After cache subtraction (Total - CacheReadTokens)
+	CacheReadTokens int64   // How much was served from cache
+	CachePercent    float64 // What percentage was cached
+	ModelContext    int64   // Context window size
+	Cost            float64
 }
 
 // ModelInfo renders model information including name, provider, reasoning
@@ -62,7 +65,7 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	}
 
 	if context != nil {
-		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
+		formattedInfo := formatTokensAndCost(t, context)
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
 	}
 
@@ -71,38 +74,72 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	)
 }
 
-// formatTokensAndCost formats token usage and cost with appropriate units
-// (K/M) and percentage of context window.
-func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
-	var formattedTokens string
+// formatTokensAndCost formats token usage and cost with dual display showing
+// both total tokens and effective tokens (after cache subtraction).
+// Returns two lines: usage line and cache line (cache line empty if no caching).
+func formatTokensAndCost(t *styles.Styles, info *ModelContextInfo) string {
+	// Format total tokens
+	var formattedTotal string
 	switch {
-	case tokens >= 1_000_000:
-		formattedTokens = fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
-	case tokens >= 1_000:
-		formattedTokens = fmt.Sprintf("%.1fK", float64(tokens)/1_000)
+	case info.TotalTokens >= 1_000_000:
+		formattedTotal = fmt.Sprintf("%.1fM", float64(info.TotalTokens)/1_000_000)
+	case info.TotalTokens >= 1_000:
+		formattedTotal = fmt.Sprintf("%.1fK", float64(info.TotalTokens)/1_000)
 	default:
-		formattedTokens = fmt.Sprintf("%d", tokens)
+		formattedTotal = fmt.Sprintf("%d", info.TotalTokens)
+	}
+	if strings.HasSuffix(formattedTotal, ".0K") {
+		formattedTotal = strings.Replace(formattedTotal, ".0K", "K", 1)
+	}
+	if strings.HasSuffix(formattedTotal, ".0M") {
+		formattedTotal = strings.Replace(formattedTotal, ".0M", "M", 1)
 	}
 
-	if strings.HasSuffix(formattedTokens, ".0K") {
-		formattedTokens = strings.Replace(formattedTokens, ".0K", "K", 1)
+	// Format effective tokens
+	var formattedEffective string
+	switch {
+	case info.EffectiveTokens >= 1_000_000:
+		formattedEffective = fmt.Sprintf("%.1fM", float64(info.EffectiveTokens)/1_000_000)
+	case info.EffectiveTokens >= 1_000:
+		formattedEffective = fmt.Sprintf("%.1fK", float64(info.EffectiveTokens)/1_000)
+	default:
+		formattedEffective = fmt.Sprintf("%d", info.EffectiveTokens)
 	}
-	if strings.HasSuffix(formattedTokens, ".0M") {
-		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
+	if strings.HasSuffix(formattedEffective, ".0K") {
+		formattedEffective = strings.Replace(formattedEffective, ".0K", "K", 1)
+	}
+	if strings.HasSuffix(formattedEffective, ".0M") {
+		formattedEffective = strings.Replace(formattedEffective, ".0M", "M", 1)
 	}
 
-	percentage := (float64(tokens) / float64(contextWindow)) * 100
+	// Calculate percentage based on TOTAL (conservative warning)
+	totalPct := (float64(info.TotalTokens) / float64(info.ModelContext)) * 100
 
-	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
+	// Format cost
+	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", info.Cost))
 
-	formattedTokens = t.Subtle.Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := t.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
-	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
-	if percentage > 80 {
-		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)
+	// Line 1: Usage - "42% (85K total / 42K effective) $0.12"
+	formattedPercentage := t.Muted.Render(fmt.Sprintf("%d%%", int(totalPct)))
+	formattedTokens := t.Subtle.Render(fmt.Sprintf("(%s total / %s effective)",
+		formattedTotal, formattedEffective))
+	usageLine := fmt.Sprintf("%s %s %s", formattedPercentage, formattedTokens, formattedCost)
+
+	// Add warning icon if needed
+	if totalPct > 80 {
+		usageLine = fmt.Sprintf("%s %s", styles.LSPWarningIcon, usageLine)
 	}
 
-	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
+	// Line 2: Cache info (only if there's caching) - "50% cached"
+	var cacheLine string
+	if info.CachePercent > 0 {
+		cacheLine = t.Subtle.Render(fmt.Sprintf("   %.0f%% cached", info.CachePercent))
+	}
+
+	// Combine lines
+	if cacheLine != "" {
+		return usageLine + "\n" + cacheLine
+	}
+	return usageLine
 }
 
 // StatusOpts defines options for rendering a status line with icon, title,

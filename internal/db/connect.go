@@ -27,14 +27,6 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Back-fill columns that were added to the initial migration after
-	// some databases had already been created. This runs before goose
-	// so the SQL migrations always see a consistent schema.
-	if err := ensureColumns(ctx, db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to ensure columns: %w", err)
-	}
-
 	goose.SetBaseFS(FS)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -45,6 +37,14 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	if err := goose.Up(db, "migrations"); err != nil {
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	// Back-fill columns that were added to the initial migration after
+	// some databases had already been created. This runs AFTER goose
+	// migrations so that tables exist for fresh databases.
+	if err := ensureColumns(ctx, db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ensure columns: %w", err)
 	}
 
 	return db, nil

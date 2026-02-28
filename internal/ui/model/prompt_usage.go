@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -16,7 +17,9 @@ func (m *UI) loadPromptUsage() tea.Cmd {
 	return func() tea.Msg {
 		messages, err := m.com.App.Messages.ListAllUserMessages(context.Background())
 		if err != nil {
-			return promptUsageLoadedMsg{userMessages: map[string]int64{}}
+			// Log error but preserve existing data - don't wipe it
+			slog.Error("Failed to load prompt usage", "error", err)
+			return promptUsageLoadedMsg{userMessages: m.localUserMessages}
 		}
 
 		userMessages := make(map[string]int64, len(messages))
@@ -38,9 +41,10 @@ func (m *UI) startPromptUsageRefreshTicker() tea.Cmd {
 }
 
 func (m *UI) localPromptUsageCounts(now time.Time) (fiveHour, sevenDay int) {
-	// Database stores timestamps in milliseconds, so use UnixMilli
-	sevenDayCutoff := now.Add(-7 * 24 * time.Hour).UnixMilli()
-	fiveHourCutoff := now.Add(-5 * time.Hour).UnixMilli()
+	// Database stores timestamps in SECONDS (using strftime('%s', 'now'))
+	// so use Unix() not UnixMilli() for comparison
+	sevenDayCutoff := now.Add(-7 * 24 * time.Hour).Unix()
+	fiveHourCutoff := now.Add(-5 * time.Hour).Unix()
 
 	for id, ts := range m.localUserMessages {
 		if ts < sevenDayCutoff {

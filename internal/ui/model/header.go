@@ -221,9 +221,10 @@ func renderHeaderDetails(
 	contextWindow := config.Get().GetModelContextWindow(agentCfg.Model)
 	var percentage float64
 	if contextWindow > 0 {
-		// Subtract cache read tokens - they don't consume fresh context
-		contextUsed := session.CompletionTokens + session.PromptTokens - session.CacheReadTokens
-		percentage = (float64(contextUsed) / float64(contextWindow)) * 100
+		// Use TOTAL tokens for percentage (conservative - shows actual context pressure)
+		// The sidebar shows the detailed dual-display with cache info
+		totalTokens := session.CompletionTokens + session.PromptTokens
+		percentage = (float64(totalTokens) / float64(contextWindow)) * 100
 	}
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)

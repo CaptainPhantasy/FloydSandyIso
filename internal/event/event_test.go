@@ -1,61 +1,75 @@
 package event
 
-// These tests verify that the Error function correctly handles various
-// scenarios. These tests will not log anything.
+// These tests verify that the stubbed telemetry functions work correctly
+// as no-ops without panicking.
 
 import (
 	"testing"
 )
 
 func TestError(t *testing.T) {
-	t.Run("returns early when client is nil", func(t *testing.T) {
-		// This test verifies that when the PostHog client is not initialized
-		// the Error function safely returns early without attempting to
-		// enqueue any events. This is important during initialization or when
-		// metrics are disabled, as we don't want the error reporting mechanism
-		// itself to cause panics.
-		originalClient := client
-		defer func() {
-			client = originalClient
-		}()
-
-		client = nil
-		Error("test error", "key", "value")
+	t.Run("handles nil error without panicking", func(t *testing.T) {
+		// Verify Error handles nil gracefully
+		Error(nil)
 	})
 
-	t.Run("handles nil client without panicking", func(t *testing.T) {
-		// This test covers various edge cases where the error value might be
-		// nil, a string, or an error type.
-		originalClient := client
-		defer func() {
-			client = originalClient
-		}()
-
-		client = nil
-		Error(nil)
+	t.Run("handles string error without panicking", func(t *testing.T) {
 		Error("some error")
+	})
+
+	t.Run("handles error type without panicking", func(t *testing.T) {
 		Error(newDefaultTestError("runtime error"), "key", "value")
 	})
 
-	t.Run("handles error with properties", func(t *testing.T) {
-		// This test verifies that the Error function can handle additional
-		// key-value properties that provide context about the error. These
-		// properties are typically passed when recovering from panics (i.e.,
-		// panic name, function name).
-		//
-		// Even with these additional properties, the function should handle
-		// them gracefully without panicking.
-		originalClient := client
-		defer func() {
-			client = originalClient
-		}()
-
-		client = nil
+	t.Run("handles error with properties without panicking", func(t *testing.T) {
 		Error("test error",
 			"type", "test",
 			"severity", "high",
 			"source", "unit-test",
 		)
+	})
+}
+
+func TestNoOpFunctions(t *testing.T) {
+	t.Run("all no-op functions can be called without panicking", func(t *testing.T) {
+		// These should all be no-ops and not panic
+		Init()
+		Flush()
+		Alias("test-id")
+		SetNonInteractive(true)
+		SessionCreated()
+		SessionDeleted()
+		SessionSwitched()
+		FilePickerOpened()
+		LSPStarted("gopls")
+		LSPRestarted("gopls")
+		MCPStarted("test-mcp")
+		PromptSent("key", "value")
+		PromptResponded("key", "value")
+		TokensUsed("count", 100)
+	})
+}
+
+func TestGetID(t *testing.T) {
+	t.Run("returns local identifier", func(t *testing.T) {
+		id := GetID()
+		if id != "local" {
+			t.Errorf("Expected GetID() = 'local', got '%s'", id)
+		}
+	})
+}
+
+func TestAppInitialized(t *testing.T) {
+	t.Run("sets app start time", func(t *testing.T) {
+		AppInitialized()
+		// Just verify it doesn't panic - the appStartTime is set internally
+	})
+}
+
+func TestAppExited(t *testing.T) {
+	t.Run("handles exit without panicking", func(t *testing.T) {
+		AppInitialized() // Ensure start time is set
+		AppExited()      // Should not panic
 	})
 }
 
