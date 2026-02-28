@@ -37,6 +37,15 @@ func DefaultChangelog() *Changelog {
 		Categories:     []string{"agent", "tools", "ui", "performance", "safety"},
 		Entries: []ChangelogEntry{
 			{
+				Version:     "v4.6",
+				Type:        "feature",
+				Title:       "Forced MCP Tool Discovery",
+				Description: "Agent now probes ALL running MCP servers at boot via stdin JSON-RPC, regardless of floyd.json config or tool schema visibility. 94+ tools across 13 servers are forced into awareness. Eliminates 'I don't have that tool' assumptions.",
+				Category:    "agent",
+				Date:        "2026-02-28",
+				RelatedDocs: []string{"internal/agent/templates/floyd_protocol.md.tpl"},
+			},
+			{
 				Version:     "v4.0.0",
 				Type:        "feature",
 				Title:       "Tool Registry Boot Discovery",

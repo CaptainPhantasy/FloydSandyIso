@@ -547,6 +547,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
+	// Debug: log MCP tool inclusion
+	mcpCount := 0
+	for _, t := range filteredTools {
+		if strings.HasPrefix(t.Info().Name, "mcp_") {
+			mcpCount++
+		}
+	}
+	slog.Info("buildTools completed", "agent", agent.Name, "total_tools", len(filteredTools), "mcp_tools", mcpCount, "allowed_mcp_nil", agent.AllowedMCP == nil)
 	return filteredTools, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +105,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	app.setupEvents()
 
+	// Auto-Initialization: ensure standard FLOYD.md exists in working directory.
+	if err := ensureProtocolFile(cfg.WorkingDir()); err != nil {
+		slog.Warn("Auto-initialization failed: could not ensure FLOYD.md", "error", err)
+	}
+
 	// Initialize LSP clients in the background.
 	go app.initLSPClients(ctx)
 
@@ -120,10 +126,36 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		slog.Warn("No agent configuration found")
 		return app, nil
 	}
+
+	// Wait for MCP initialization to complete before building agent tools.
+	// This ensures MCP tools are discovered and available when buildTools() runs.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		slog.Warn("MCP initialization failed or timed out", "error", err)
+		// Continue anyway - agent can still work with built-in tools
+	}
+
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 	return app, nil
+}
+
+// ensureProtocolFile writes a standard FLOYD.md if none of the default context paths exist.
+func ensureProtocolFile(workingDir string) error {
+	// Default context paths are defined in config; mirror here to avoid import cycles.
+	candidates := []string{"FLOYD.md", "FLOYD.local.md"}
+	for _, name := range candidates {
+		if _, err := os.Stat(filepath.Join(workingDir, name)); err == nil {
+			return nil // already present
+		}
+	}
+	content := agent.FloydProtocol()
+	path := filepath.Join(workingDir, "FLOYD.md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write FLOYD.md: %w", err)
+	}
+	slog.Info("Auto-created FLOYD.md in working directory", "path", path)
+	return nil
 }
 
 // Config returns the application configuration.
