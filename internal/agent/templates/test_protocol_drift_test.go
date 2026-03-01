@@ -52,4 +52,33 @@ func TestProtocolTemplatesDrift(t *testing.T) {
 			t.Fatalf("coder.md.tpl missing anchor: %q", anchor)
 		}
 	}
+
+	mustContain := []string{
+		"I am FLOYD v4.6.1",
+		"HTTP /supercache/* MUST NOT be used",
+	}
+	for _, m := range mustContain {
+		if !strings.Contains(rootS, m) {
+			t.Fatalf("root FLOYD.md missing required text: %q", m)
+		}
+		if !strings.Contains(protoS, m) {
+			t.Fatalf("floyd_protocol.md.tpl missing required text: %q", m)
+		}
+	}
+
+	mustNotContain := []string{
+		"v4.0.0",
+		"FORCE MCP DISCOVERY",
+	}
+	for _, bad := range mustNotContain {
+		if strings.Contains(rootS, bad) {
+			t.Fatalf("root FLOYD.md contains forbidden text: %q", bad)
+		}
+		if strings.Contains(protoS, bad) {
+			t.Fatalf("floyd_protocol.md.tpl contains forbidden text: %q", bad)
+		}
+		if strings.Contains(coderS, bad) {
+			t.Fatalf("coder.md.tpl contains forbidden text: %q", bad)
+		}
+	}
 }

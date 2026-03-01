@@ -50,6 +50,10 @@ floyd run --verbose "Generate a README for this project"
 		}
 		defer app.Shutdown()
 
+		if err := enforceRetryBudget(app.Config().Options.DataDirectory); err != nil {
+			return err
+		}
+
 		if !app.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'floyd' to set up a provider interactively")
 		}
@@ -66,6 +70,12 @@ floyd run --verbose "Generate a README for this project"
 			return err
 		}
 
+		prompt = applyAutoStabilizeIfNeeded(ctx, app.Config(), prompt)
+		gate := applyRunQualityGates(prompt)
+		if gate.Enabled && len(gate.Violations) > 0 {
+			return fmt.Errorf("run quality gates blocked execution: %s", strings.Join(gate.Violations, "; "))
+		}
+
 		if prompt == "" {
 			return fmt.Errorf("no prompt provided")
 		}
@@ -73,7 +83,12 @@ floyd run --verbose "Generate a README for this project"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
+		runErr := app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
+		if runErr == nil {
+			recordRunSuccess(app.Config().Options.DataDirectory)
+			return nil
+		}
+		return maybeTripCircuitBreaker(app.Config().Options.DataDirectory, runErr)
 	},
 	PostRun: func(cmd *cobra.Command, args []string) {
 		event.AppExited()

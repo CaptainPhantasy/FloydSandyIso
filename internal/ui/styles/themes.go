@@ -2,6 +2,9 @@ package styles
 
 import (
 	"image/color"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
@@ -15,6 +18,7 @@ const (
 	ThemeSunset     ThemeName = "Sunset"
 	ThemeDeepSea    ThemeName = "Deep Sea"
 	ThemeNeonHacker ThemeName = "Neon Hacker"
+	ThemeSuperFloyd ThemeName = "SuperFloyd"
 )
 
 // ThemePreset defines the accent palette that drives the entire UI
@@ -107,6 +111,23 @@ func init() {
 			Blue:        mustHex("#00FF41"),
 			BlueDark:    mustHex("#006400"),
 			Red:         mustHex("#FF3131"),
+		},
+		{
+			// SuperFloyd - Red, White, Blue patriotic theme
+			Name:        ThemeSuperFloyd,
+			Primary:     mustHex("#DC143C"), // Crimson Red
+			Secondary:   mustHex("#FFFFFF"), // White
+			Tertiary:    mustHex("#4169E1"), // Royal Blue
+			BorderFocus: mustHex("#DC143C"), // Red border
+			LogoColorA:  mustHex("#DC143C"), // Red start
+			LogoColorB:  mustHex("#4169E1"), // Blue end
+			LogoCharm:   mustHex("#FFFFFF"), // White
+			LogoField:   mustHex("#4169E1"), // Blue diagonals
+			Green:       mustHex("#4169E1"), // Use blue for success
+			GreenDark:   mustHex("#1E3A8A"), // Dark blue
+			Blue:        mustHex("#4169E1"), // Royal Blue
+			BlueDark:    mustHex("#1E3A8A"), // Dark blue
+			Red:         mustHex("#DC143C"), // Crimson
 		},
 	}
 }
@@ -269,6 +290,28 @@ func (s *Styles) ApplyTheme(t ThemePreset) {
 
 	// --- LSP / MCP online icon ---
 	s.ItemOnlineIcon = lipgloss.NewStyle().Foreground(t.GreenDark).SetString("●")
+}
+
+// IsSuperFloydBinary returns true if the current binary name contains "superfloyd"
+func IsSuperFloydBinary() bool {
+	name := strings.ToLower(filepath.Base(os.Args[0]))
+	return strings.Contains(name, "superfloyd")
+}
+
+// AutoApplySuperFloydTheme applies the SuperFloyd theme if running as SuperFloyd binary.
+// Returns true if the theme was applied.
+func (s *Styles) AutoApplySuperFloydTheme() bool {
+	if !IsSuperFloydBinary() {
+		return false
+	}
+	// Find and apply SuperFloyd theme
+	for _, preset := range ThemePresets() {
+		if preset.Name == ThemeSuperFloyd {
+			s.ApplyTheme(preset)
+			return true
+		}
+	}
+	return false
 }
 
 // CycleTheme advances to the next theme preset, applies it, and

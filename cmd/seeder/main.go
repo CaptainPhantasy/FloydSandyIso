@@ -96,6 +96,13 @@ func mustOK(resp *rpcResp) error {
 }
 
 func main() {
+	port := "8083"
+	if len(os.Args) > 1 {
+		port = os.Args[1]
+	}
+
+	fmt.Printf("Starting Floyd MCP Server on port %s\n", port)
+
 	in := bufio.NewReader(os.Stdin)
 	out := bufio.NewWriter(os.Stdout)
 
@@ -152,7 +159,7 @@ func main() {
 			ID:      id,
 			Method:  "tools/call",
 			Params: map[string]any{
-				"name":     "cache_store",
+				"name":      "cache_store",
 				"arguments": p,
 			},
 		}

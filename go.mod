@@ -3,12 +3,12 @@ module github.com/CaptainPhantasy/FloydSandyIso
 go 1.26.0
 
 require (
-	charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66
-	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e
-	charm.land/catwalk v0.16.1
+	charm.land/bubbles/v2 v2.0.0-rc.1
+	charm.land/bubbletea/v2 v2.0.0-rc.2
+	charm.land/catwalk v0.25.0
 	charm.land/fantasy v0.11.0
 	charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b
-	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971
+	charm.land/lipgloss/v2 v2.0.0
 	charm.land/log/v2 v2.0.0-20251110204020-529bb77f35da
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -16,13 +16,13 @@ require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/atotto/clipboard v0.1.4
-	github.com/aymanbagabas/go-udiff v0.3.1
+	github.com/aymanbagabas/go-udiff v0.4.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
-	github.com/charmbracelet/colorprofile v0.4.1
+	github.com/charmbracelet/colorprofile v0.4.2
 	github.com/charmbracelet/fang v0.4.4
 	github.com/charmbracelet/ultraviolet v0.0.0-20251212194010-b927aa605560
-	github.com/charmbracelet/x/ansi v0.11.4
+	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/charmbracelet/x/editor v0.2.0
 	github.com/charmbracelet/x/etag v0.2.0
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f
@@ -32,11 +32,10 @@ require (
 	github.com/charmbracelet/x/exp/strings v0.1.0
 	github.com/charmbracelet/x/powernap v0.0.0-20260127155452-b72a9a918687
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/charmbracelet/x/vt v0.0.0-20260204111555-7642919e0bee
-	github.com/clipperhouse/displaywidth v0.9.0
-	github.com/clipperhouse/uax29/v2 v2.5.0
+	github.com/charmbracelet/x/vt v0.0.0-20260301003739-baafbde16d0a
+	github.com/clipperhouse/displaywidth v0.11.0
+	github.com/clipperhouse/uax29/v2 v2.7.0
 	github.com/creack/pty v1.1.24
-	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imaging v1.6.2
 	github.com/dustin/go-humanize v1.0.1
 	github.com/google/uuid v1.6.0
@@ -50,7 +49,6 @@ require (
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.9.1
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/rivo/uniseg v0.4.7
@@ -103,7 +101,6 @@ require (
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
-	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -113,8 +110,8 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.3.0 // indirect
@@ -123,7 +120,6 @@ require (
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kaptinlin/go-i18n v0.2.11 // indirect
 	github.com/kaptinlin/jsonpointer v0.4.16 // indirect
@@ -133,7 +129,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/mattn/go-runewidth v0.0.19 // indirect
+	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect

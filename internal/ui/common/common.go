@@ -34,6 +34,7 @@ func (c *Common) Config() *config.Config {
 // DefaultCommon returns the default common UI configurations.
 func DefaultCommon(app *app.App) *Common {
 	s := styles.DefaultStyles()
+	s.AutoApplySuperFloydTheme() // Auto-apply SuperFloyd theme if running as SuperFloyd
 	return &Common{
 		App:    app,
 		Styles: &s,

@@ -22,7 +22,7 @@ type ContextStatusResponse struct {
 	ContextWindow    int64   `json:"context_window"`
 	PercentUsed      float64 `json:"percent_used"`      // based on TOTAL (conservative)
 	RemainingTokens  int64   `json:"remaining_tokens"`
-	ShouldSummarize  bool    `json:"should_summarize"`  // approaching limit
+	ShouldHandoff    bool    `json:"should_handoff"`    // approaching limit, prepare for handoff
 	SessionID        string  `json:"session_id"`
 }
 
@@ -59,8 +59,9 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 
 			remaining := contextWindow - totalTokens
 
-			// Warn if approaching limit (80%+ of TOTAL)
-			shouldSummarize := percentUsed >= 80.0
+			// Warn if approaching handoff threshold (80%+ of TOTAL)
+			// At 95%, automatic handoff will trigger
+			shouldHandoff := percentUsed >= 80.0
 
 			status := ContextStatusResponse{
 				PromptTokens:     sess.PromptTokens,
@@ -72,18 +73,18 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 				ContextWindow:    contextWindow,
 				PercentUsed:      percentUsed,
 				RemainingTokens:  remaining,
-				ShouldSummarize:  shouldSummarize,
+				ShouldHandoff:    shouldHandoff,
 				SessionID:        sessionID,
 			}
 
 			// Human-readable summary with dual display
 			var summary string
-			if shouldSummarize {
+			if shouldHandoff {
 				summary = fmt.Sprintf(
 					"⚠️ CONTEXT WARNING: %.1f%% of window used\n"+
 						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
 						"  Remaining: %d tokens | Window: %d\n"+
-						"  Consider being more concise or requesting summarization.",
+						"  At 95%%, session will hand off. Consider being more concise or preparing for handoff.",
 					percentUsed,
 					totalTokens, effectiveTokens, cachePercent,
 					remaining, contextWindow,

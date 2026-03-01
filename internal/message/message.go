@@ -20,6 +20,11 @@ type CreateMessageParams struct {
 	IsSummaryMessage bool
 }
 
+// ArchiveResult represents a single result from the technical archive query.
+type ArchiveResult struct {
+	Message Message `json:"message"`
+}
+
 type Service interface {
 	pubsub.Subscriber[Message]
 	Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
@@ -30,16 +35,22 @@ type Service interface {
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
+	// SearchTechnicalArchive queries the message database with a semantic filter.
+	// It returns only technical data (tool calls, tool results, code blocks) and
+	// excludes conversational text to prevent persona drift.
+	SearchTechnicalArchive(ctx context.Context, projectPath, query string, limit int) ([]ArchiveResult, error)
 }
 
 type service struct {
 	*pubsub.Broker[Message]
-	q db.Querier
+	db *sql.DB
+	q  db.Querier
 }
 
-func NewService(q db.Querier) Service {
+func NewService(q db.Querier, dbConn *sql.DB) Service {
 	return &service{
 		Broker: pubsub.NewBroker[Message](),
+		db:     dbConn,
 		q:      q,
 	}
 }
@@ -187,6 +198,58 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 		}
 	}
 	return messages, nil
+}
+
+func (s *service) SearchTechnicalArchive(ctx context.Context, projectPath, query string, limit int) ([]ArchiveResult, error) {
+	if limit == 0 {
+		limit = 5
+	}
+
+	queryPattern := "%" + query + "%"
+	codeBlockPattern := "%" + "```" + "%"
+	toolCallPattern := `%"type":"tool_call"%`
+
+	// Schema-accurate: Search inside parts, no hallucinated tool_calls column
+	sqlQuery := `
+		SELECT id, session_id, role, parts, created_at 
+		FROM messages 
+		WHERE parts LIKE ? 
+		AND (
+			(role = 'assistant' AND parts LIKE ?)
+			OR role = 'tool'
+			OR (role = 'user' AND parts LIKE ?)
+		)
+		ORDER BY created_at DESC 
+		LIMIT ?`
+
+	rows, err := s.db.QueryContext(ctx, sqlQuery, queryPattern, toolCallPattern, codeBlockPattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("archive search query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var results []ArchiveResult
+	for rows.Next() {
+		var dbMsg db.Message
+
+		// Safely scan only the 5 selected columns directly into the db.Message struct
+		if err := rows.Scan(&dbMsg.ID, &dbMsg.SessionID, &dbMsg.Role, &dbMsg.Parts, &dbMsg.CreatedAt); err != nil {
+			continue
+		}
+
+		msg, err := s.fromDBItem(dbMsg)
+		if err != nil {
+			continue // Skip malformed messages
+		}
+
+		results = append(results, ArchiveResult{Message: msg})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return results, nil
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {

@@ -19,28 +19,11 @@ func PrettyPath(t *styles.Styles, path string, width int) string {
 	return t.Muted.Width(width).Render(formatted)
 }
 
-// Stoplight threshold constants for context usage
-const (
-	StoplightGreenThreshold  = 70.0 // 0-70%: Normal operation
-	StoplightYellowThreshold = 84.0 // 71-84%: Caution
-	StoplightRedThreshold    = 85.0 // 85%+: Critical, triggers auto-export
-)
-
-// Stoplight indicator emojis
-const (
-	StoplightGreen  = "🟢"
-	StoplightYellow = "🟡"
-	StoplightRed    = "🔴"
-)
-
 // ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
-	TotalTokens     int64   // Raw total (PromptTokens + CompletionTokens)
-	EffectiveTokens int64   // After cache subtraction (Total - CacheReadTokens)
-	CacheReadTokens int64   // How much was served from cache
-	CachePercent    float64 // What percentage was cached
-	ModelContext    int64   // Context window size
-	Cost            float64
+	ContextUsed  int64
+	ModelContext int64
+	Cost         float64
 }
 
 // ModelInfo renders model information including name, provider, reasoning
@@ -79,7 +62,7 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	}
 
 	if context != nil {
-		formattedInfo := formatTokensAndCost(t, context)
+		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
 	}
 
@@ -90,94 +73,38 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 
 // getStoplightIndicator returns the appropriate stoplight emoji based on
 // context usage percentage.
-func getStoplightIndicator(pct float64) string {
+// formatTokensAndCost formats token usage and cost with appropriate units
+// (K/M) and percentage of context window.
+func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
+	var formattedTokens string
 	switch {
-	case pct >= StoplightRedThreshold:
-		return StoplightRed
-	case pct > StoplightGreenThreshold:
-		return StoplightYellow
+	case tokens >= 1_000_000:
+		formattedTokens = fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
+	case tokens >= 1_000:
+		formattedTokens = fmt.Sprintf("%.1fK", float64(tokens)/1_000)
 	default:
-		return StoplightGreen
-	}
-}
-
-// isCriticalState returns true if context usage is at or above the red threshold.
-func isCriticalState(pct float64) bool {
-	return pct >= StoplightRedThreshold
-}
-
-// formatTokensAndCost formats token usage and cost with stoplight indicator.
-// Format: "🟢 22% • 45K/2K • $0.24" (line 1)
-//         "95% cached" (line 2, if caching active)
-//         "⚠ Near limit • Ctrl+N" (line 3, if critical)
-func formatTokensAndCost(t *styles.Styles, info *ModelContextInfo) string {
-	// Format total tokens
-	var formattedTotal string
-	switch {
-	case info.TotalTokens >= 1_000_000:
-		formattedTotal = fmt.Sprintf("%.1fM", float64(info.TotalTokens)/1_000_000)
-	case info.TotalTokens >= 1_000:
-		formattedTotal = fmt.Sprintf("%.1fK", float64(info.TotalTokens)/1_000)
-	default:
-		formattedTotal = fmt.Sprintf("%d", info.TotalTokens)
-	}
-	if strings.HasSuffix(formattedTotal, ".0K") {
-		formattedTotal = strings.Replace(formattedTotal, ".0K", "K", 1)
-	}
-	if strings.HasSuffix(formattedTotal, ".0M") {
-		formattedTotal = strings.Replace(formattedTotal, ".0M", "M", 1)
+		formattedTokens = fmt.Sprintf("%d", tokens)
 	}
 
-	// Format effective tokens
-	var formattedEffective string
-	switch {
-	case info.EffectiveTokens >= 1_000_000:
-		formattedEffective = fmt.Sprintf("%.1fM", float64(info.EffectiveTokens)/1_000_000)
-	case info.EffectiveTokens >= 1_000:
-		formattedEffective = fmt.Sprintf("%.1fK", float64(info.EffectiveTokens)/1_000)
-	default:
-		formattedEffective = fmt.Sprintf("%d", info.EffectiveTokens)
+	if strings.HasSuffix(formattedTokens, ".0K") {
+		formattedTokens = strings.Replace(formattedTokens, ".0K", "K", 1)
 	}
-	if strings.HasSuffix(formattedEffective, ".0K") {
-		formattedEffective = strings.Replace(formattedEffective, ".0K", "K", 1)
-	}
-	if strings.HasSuffix(formattedEffective, ".0M") {
-		formattedEffective = strings.Replace(formattedEffective, ".0M", "M", 1)
+	if strings.HasSuffix(formattedTokens, ".0M") {
+		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
 	}
 
-	// Calculate percentage based on TOTAL (conservative warning)
-	totalPct := (float64(info.TotalTokens) / float64(info.ModelContext)) * 100
+	percentage := (float64(tokens) / float64(contextWindow)) * 100
 
-	// Get stoplight indicator
-	indicator := getStoplightIndicator(totalPct)
+	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
 
-	// Format cost
-	formattedCost := fmt.Sprintf("$%.2f", info.Cost)
-
-	// Build line 1: "🟢 22% • 45K/2K • $0.24"
-	// Use bullet separator for compactness
-	formattedPercentage := fmt.Sprintf("%d%%", int(totalPct))
-	formattedTokens := fmt.Sprintf("%s/%s", formattedTotal, formattedEffective)
-	usageLine := fmt.Sprintf("%s %s • %s • %s",
-		indicator, formattedPercentage, formattedTokens, formattedCost)
-
-	// Build lines
-	var lines []string
-	lines = append(lines, usageLine)
-
-	// Line 2: Cache info (only if there's caching) - "95% cached"
-	if info.CachePercent > 0 {
-		cacheLine := t.Subtle.Render(fmt.Sprintf("%.0f%% cached", info.CachePercent))
-		lines = append(lines, cacheLine)
+	formattedTokens = t.Subtle.Render(fmt.Sprintf("(%s)", formattedTokens))
+	formattedPercentage := t.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
+	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
+	if percentage > 80 {
+		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)
 	}
 
-	// Line 3: Warning for critical state (85%+) - "⚠ Near limit • Ctrl+N"
-	if isCriticalState(totalPct) {
-		warningLine := t.LSP.WarningDiagnostic.Render("⚠ Near limit • Ctrl+N")
-		lines = append(lines, warningLine)
-	}
-
-	return strings.Join(lines, "\n")
+	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }
 
 // StatusOpts defines options for rendering a status line with icon, title,

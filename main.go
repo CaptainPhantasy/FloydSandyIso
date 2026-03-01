@@ -6,16 +6,32 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/joho/godotenv"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/cmd"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	binName := "floyd"
 	// Set the command name dynamically based on the binary name
 	if len(os.Args) > 0 {
-		binName := filepath.Base(os.Args[0])
+		binName = filepath.Base(os.Args[0])
 		cmd.SetRootUse(binName)
+	}
+
+	// Isolate SuperFloyd runtime roots automatically unless explicitly overridden.
+	if strings.EqualFold(binName, "superfloyd") {
+		if os.Getenv("FLOYD_GLOBAL_CONFIG") == "" {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				_ = os.Setenv("FLOYD_GLOBAL_CONFIG", filepath.Join(homeDir, ".superfloyd", "config"))
+			}
+		}
+		if os.Getenv("FLOYD_GLOBAL_DATA") == "" {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				_ = os.Setenv("FLOYD_GLOBAL_DATA", filepath.Join(homeDir, ".superfloyd", "data"))
+			}
+		}
 	}
 
 	for _, arg := range os.Args[1:] {

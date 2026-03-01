@@ -51,9 +51,9 @@ RETURNING *;
 UPDATE sessions
 SET
     title = ?,
-    prompt_tokens = prompt_tokens + ?,
-    completion_tokens = completion_tokens + ?,
-    cache_read_tokens = cache_read_tokens + ?,
+    prompt_tokens = ?,
+    completion_tokens = ?,
+    cache_read_tokens = ?,
     cost = cost + ?
 WHERE id = ?;
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,10 +18,13 @@ import (
 )
 
 const (
-	ParallelBashToolName    = "parallel_bash"
-	MaxParallelCommands     = 4
-	ParallelDefaultTimeout  = 60 * time.Second
-	ParallelMaxOutputPerJob = 10000
+	ParallelBashToolName         = "parallel_bash"
+	DefaultMaxParallelCommands   = 4
+	SuperFloydMaxParallel        = 12
+	ParallelDefaultTimeout       = 60 * time.Second
+	ParallelMaxOutputPerJob      = 10000
+	DefaultParallelConcurrency   = 4
+	SuperFloydMaxParallelCeiling = 32
 )
 
 //go:embed parallel_bash.tpl
@@ -31,9 +36,11 @@ type ParallelBashCommand struct {
 }
 
 type ParallelBashParams struct {
-	Commands   []ParallelBashCommand `json:"commands" description:"Array of commands to execute in parallel (max 4)"`
-	WorkingDir string                `json:"working_dir,omitempty" description:"Working directory for all commands (defaults to current directory)"`
-	Timeout    int                   `json:"timeout,omitempty" description:"Timeout in seconds for all commands (default 60, max 300)"`
+	Commands       []ParallelBashCommand `json:"commands" description:"Array of commands to execute in parallel (max depends on lane)"`
+	WorkingDir     string                `json:"working_dir,omitempty" description:"Working directory for all commands (defaults to current directory)"`
+	Timeout        int                   `json:"timeout,omitempty" description:"Timeout in seconds for all commands (default 60, max 300)"`
+	MaxConcurrency int                   `json:"max_concurrency,omitempty" description:"Max concurrent commands to run at once (default 4)"`
+	FailFast       bool                  `json:"fail_fast,omitempty" description:"Cancel remaining commands on first failure"`
 }
 
 type ParallelBashResult struct {
@@ -47,10 +54,10 @@ type ParallelBashResult struct {
 }
 
 type ParallelBashResponseMetadata struct {
-	TotalDuration int64                 `json:"total_duration_ms"`
-	WorkingDir    string                `json:"working_directory"`
-	Results       []ParallelBashResult  `json:"results"`
-	Summary       string                `json:"summary"`
+	TotalDuration int64                `json:"total_duration_ms"`
+	WorkingDir    string               `json:"working_directory"`
+	Results       []ParallelBashResult `json:"results"`
+	Summary       string               `json:"summary"`
 }
 
 func NewParallelBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, allowedBannedCommands []string) fantasy.AgentTool {
@@ -62,8 +69,9 @@ func NewParallelBashTool(permissions permission.Service, workingDir string, attr
 			if len(params.Commands) == 0 {
 				return fantasy.NewTextErrorResponse("no commands provided"), nil
 			}
-			if len(params.Commands) > MaxParallelCommands {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("too many commands: %d (max %d)", len(params.Commands), MaxParallelCommands)), nil
+			maxCommands := maxParallelCommandsForLane()
+			if len(params.Commands) > maxCommands {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("too many commands: %d (max %d)", len(params.Commands), maxCommands)), nil
 			}
 
 			// Validate each command has required fields
@@ -144,10 +152,38 @@ func NewParallelBashTool(permissions permission.Service, workingDir string, attr
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
 
+			concurrency := params.MaxConcurrency
+			if concurrency <= 0 {
+				concurrency = DefaultParallelConcurrency
+			}
+			if concurrency > len(params.Commands) {
+				concurrency = len(params.Commands)
+			}
+			if concurrency > maxCommands {
+				concurrency = maxCommands
+			}
+			sem := make(chan struct{}, concurrency)
+
 			for i, cmd := range params.Commands {
 				wg.Add(1)
 				go func(idx int, command ParallelBashCommand) {
 					defer wg.Done()
+
+					select {
+					case sem <- struct{}{}:
+					case <-execCtx.Done():
+						results[idx] = ParallelBashResult{
+							Index:       idx,
+							Command:     command.Command,
+							Description: command.Description,
+							Output:      "canceled before execution",
+							ExitCode:    130,
+							Duration:    0,
+							Error:       "canceled",
+						}
+						return
+					}
+					defer func() { <-sem }()
 
 					cmdStart := time.Now()
 					result := ParallelBashResult{
@@ -163,6 +199,9 @@ func NewParallelBashTool(permissions permission.Service, workingDir string, attr
 						result.ExitCode = 1
 						result.Duration = time.Since(cmdStart).Milliseconds()
 						results[idx] = result
+						if params.FailFast {
+							cancel()
+						}
 						return
 					}
 
@@ -203,6 +242,9 @@ func NewParallelBashTool(permissions permission.Service, workingDir string, attr
 
 					result.Output = output
 					results[idx] = result
+					if params.FailFast && (result.ExitCode != 0 || result.Error != "") {
+						cancel()
+					}
 				}(i, cmd)
 			}
 
@@ -226,8 +268,8 @@ func NewParallelBashTool(permissions permission.Service, workingDir string, attr
 				}
 			}
 
-			summary := fmt.Sprintf("Completed %d/%d commands successfully in %dms",
-				successCount, len(results), totalDuration)
+			summary := fmt.Sprintf("Completed %d/%d commands successfully in %dms (concurrency=%d, fail_fast=%t)",
+				successCount, len(results), totalDuration, concurrency, params.FailFast)
 
 			// Build formatted output
 			var output strings.Builder
@@ -276,4 +318,35 @@ func isSafeReadOnlyCommand(command string) bool {
 		}
 	}
 	return false
+}
+
+func maxParallelCommandsForLane() int {
+	max := DefaultMaxParallelCommands
+	bin := strings.ToLower(strings.TrimSpace(filepathBase(os.Args[0])))
+	if strings.Contains(bin, "superfloyd") {
+		max = SuperFloydMaxParallel
+	}
+	if v := strings.TrimSpace(os.Getenv("SUPERFLOYD_MAX_PARALLEL")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n > SuperFloydMaxParallelCeiling {
+				n = SuperFloydMaxParallelCeiling
+			}
+			max = n
+		}
+	}
+	if max < 1 {
+		max = 1
+	}
+	return max
+}
+
+func filepathBase(path string) string {
+	if path == "" {
+		return ""
+	}
+	i := strings.LastIndex(path, "/")
+	if i >= 0 && i+1 < len(path) {
+		return path[i+1:]
+	}
+	return path
 }

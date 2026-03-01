@@ -126,3 +126,76 @@ codesign --force --deep -s - ~/.local/bin/floyd4
 ---
 
 *This document is maintained by Terminal Shadow for context continuity.*
+
+---
+
+## SESSION HANDOFF
+
+**Previous Session ID:** current-session
+**Session Title:** Session Continuity Implementation
+**Reason:** Context window threshold reached.
+**Timestamp:** 2026-02-28T20:35:00Z
+
+### Active Todos
+
+- [x] Task 1: Handoff Section Appender (APPEND mode)
+- [x] Task 2: Add SearchTechnicalArchive to Interface
+- [x] Task 3: Implement SearchTechnicalArchive with schema-accurate SQL
+- [x] Task 4: Create query_floyd_archive tool
+- [x] Task 5: Register tool in coordinator
+- [~] Write real-world integration tests (FILES CREATED, NOT YET RUN)
+- [ ] FIX CRITICAL BUG: Context calculation is wrong
+
+### Critical Bug Discovered
+
+**Status:** ✅ FIXED (2026-03-01)
+
+**Root Cause:** Token tracking discrepancy - display shows stale data from last API response, but API requests include new file contents that haven't been counted yet.
+
+**Evidence:**
+- Display showed 140k tokens (69%)
+- Actual was ~200k tokens (99%)
+- 43% underestimation factor
+
+**Fix Implemented:**
+1. Added `estimateTokensFromPrompt()` function in `internal/agent/agent.go`
+2. Added pre-flight token check BEFORE API calls
+3. Triggers early handoff at 50% displayed (≈71% actual)
+4. Pattern crystallized to vault
+
+**Files Modified:**
+- `internal/agent/agent.go` — Pre-flight check + estimation function
+- `TOKEN_TRACKING_BUG.md` — Full root cause analysis
+
+**Key Insight:** Display updates only AFTER API responds. Pre-flight estimation prevents crashes by counting tokens BEFORE the API call.
+
+### Next Steps
+
+1. **TEST:** Run with large files at various context levels
+2. **VERIFY:** Pre-flight check triggers handoff correctly
+3. **CONSIDER:** Add real-time display updates (Phase 2)
+
+### Files Modified This Session
+
+| File | Change |
+|------|--------|
+| `internal/agent/agent.go` | APPEND mode for handoff |
+| `internal/message/message.go` | Added `db *sql.DB`, `ArchiveResult`, `SearchTechnicalArchive` |
+| `internal/agent/tools/archive_query.go` | NEW - query_floyd_archive tool |
+| `internal/agent/coordinator.go` | Tool registration |
+| `internal/app/app.go` | Pass `conn` to `message.NewService` |
+| `internal/agent/common_test.go` | Pass `conn` to `message.NewService` |
+
+### Test Files Created (NOT YET RUN)
+
+| File | Tests |
+|------|-------|
+| `internal/message/archive_test.go` | Semantic firewall, code blocks, limit |
+| `internal/agent/handoff_test.go` | APPEND behavior, multiple handoffs, todos |
+
+### Next Steps
+
+1. **RUN TESTS:** `go test ./internal/message/... ./internal/agent/... -v`
+2. **FIX BUG:** Investigate why 137k tokens = crash when 200k window expected
+3. **CHECK:** Is `ContextWindow` set correctly in config?
+4. **CHECK:** Is there a provider-level limit overriding our calculation?

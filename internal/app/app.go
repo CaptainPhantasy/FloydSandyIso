@@ -78,7 +78,7 @@ type App struct {
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
-	messages := message.NewService(q)
+	messages := message.NewService(q, conn)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
 	var allowedTools []string
@@ -109,6 +109,12 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	if err := ensureProtocolFile(cfg.WorkingDir()); err != nil {
 		slog.Warn("Auto-initialization failed: could not ensure FLOYD.md", "error", err)
 	}
+	if err := validateProtocolDrift(cfg.WorkingDir()); err != nil {
+		if os.Getenv("FLOYD_PROTOCOL_STRICT") == "1" {
+			return nil, fmt.Errorf("protocol drift detected: %w", err)
+		}
+		slog.Warn("Protocol drift detected", "error", err)
+	}
 
 	// Initialize LSP clients in the background.
 	go app.initLSPClients(ctx)
@@ -128,10 +134,26 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	// Wait for MCP initialization to complete before building agent tools.
-	// This ensures MCP tools are discovered and available when buildTools() runs.
+	// Deterministic behavior: fail startup if MCP initialization is not ready.
 	if err := mcp.WaitForInit(ctx); err != nil {
-		slog.Warn("MCP initialization failed or timed out", "error", err)
-		// Continue anyway - agent can still work with built-in tools
+		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// Deterministic supercache gate: require supercache MCP server to be connected
+	// before initializing the coder agent.
+	supercacheServer := ""
+	if _, ok := cfg.MCP["floyd-supercache-server"]; ok {
+		supercacheServer = "floyd-supercache-server"
+	} else if _, ok := cfg.MCP["floyd-supercache"]; ok {
+		supercacheServer = "floyd-supercache"
+	} else {
+		return nil, fmt.Errorf("required MCP server not configured: floyd-supercache-server (or floyd-supercache)")
+	}
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer waitCancel()
+	if err := mcp.WaitForServerConnected(waitCtx, supercacheServer); err != nil {
+		return nil, fmt.Errorf("required MCP server not connected (%s): %w", supercacheServer, err)
 	}
 
 	if err := app.InitCoderAgent(ctx); err != nil {
@@ -155,6 +177,22 @@ func ensureProtocolFile(workingDir string) error {
 		return fmt.Errorf("write FLOYD.md: %w", err)
 	}
 	slog.Info("Auto-created FLOYD.md in working directory", "path", path)
+	return nil
+}
+
+func validateProtocolDrift(workingDir string) error {
+	path := filepath.Join(workingDir, "FLOYD.md")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil // nothing to validate yet
+	}
+	content := string(b)
+	if strings.Contains(content, "v4.0.0") || strings.Contains(content, "v4.5") {
+		return fmt.Errorf("stale version markers found in %s", path)
+	}
+	if !strings.Contains(content, "I am FLOYD v4.6.1") {
+		return fmt.Errorf("missing required boot identity line in %s", path)
+	}
 	return nil
 }
 

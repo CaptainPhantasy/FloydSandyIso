@@ -286,7 +286,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	switch providerType {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+		// FIX: Only inject reasoning_effort if Think toggle is ON
+		if !hasReasoningEffort && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
@@ -319,7 +320,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	case openrouter.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+		// FIX: Only inject reasoning if Think toggle is ON
+		if !hasReasoning && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
 				"effort":  model.ModelCfg.ReasoningEffort,
@@ -331,7 +333,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case vercel.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+		// FIX: Only inject reasoning if Think toggle is ON
+		if !hasReasoning && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
 				"effort":  model.ModelCfg.ReasoningEffort,
@@ -343,7 +346,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
-		if !hasReasoning {
+		// FIX: Only inject thinking_config if Think toggle is ON
+		if !hasReasoning && model.ModelCfg.Think {
 			mergedOptions["thinking_config"] = map[string]any{
 				"thinking_budget":  2000,
 				"include_thoughts": true,
@@ -355,7 +359,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+		// FIX: Only inject reasoning_effort if Think toggle is ON
+		if !hasReasoningEffort && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
@@ -385,16 +390,16 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:         large,
-		SmallModel:         small,
-		SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
-		IsSubAgent:         isSubAgent,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
-		IsYolo:             c.permissions.SkipRequests(),
-		Sessions:           c.sessions,
-		Messages:           c.messages,
-		Tools:              nil,
-		Config:             c.cfg,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		Config:               c.cfg,
 	})
 
 	c.readyWg.Go(func() error {
@@ -467,13 +472,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, agentTool)
 	}
 
-	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
-		agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, agenticFetchTool)
-	}
+	// agentic_fetch is runtime-banned for deterministic stability.
+	// Do not register even if it appears in configured AllowedTools.
 
 	// Get the model name for the agent
 	modelName := ""
@@ -506,6 +506,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewContextStatusTool(c.sessions, c.cfg.GetModelContextWindow(config.SelectedModelTypeLarge)),
+		tools.NewComplexityEstimatorTool(),
+		tools.NewRefactorBlueprintTool(),
+		tools.NewFailureModeEnumeratorTool(),
+		tools.NewTranscriptExportTool(c.sessions, c.messages, c.cfg.GetModelContextWindow(config.SelectedModelTypeLarge), c.cfg.WorkingDir()),
+		tools.NewArchiveQueryTool(c.messages, c.cfg.WorkingDir()),
 		tools.NewSymbolIndexTool(c.cfg.WorkingDir()),
 		tools.NewVisionTool(c.permissions, c.cfg.WorkingDir()),
 		tools.NewWorkflowTool(workflow.NewEngine(c.cfg.WorkingDir())),

@@ -4,6 +4,8 @@ package logo
 import (
 	"fmt"
 	"image/color"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -41,8 +43,20 @@ func Render(s *styles.Styles, version string, compact bool, o Opts) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
 	}
 
-	// FLOYD ASCII art
-	floydASCII := `    __/\\\\\\\\\\\\\\\___/\\\____________________/\\\\\________/\\\________/\\\___/\\\\\\\\\\\\_______________
+	// FLOYD ASCII art - different for SuperFloyd
+	var floydASCII string
+	if isSuperFloyd() {
+		floydASCII = `_____/\\\\\\\\\\\____/\\\________/\\\__/\\\\\\\\\\\\\____/\\\\\\\\\\\\\\\____/\\\\\\\\\______/\\\\\\\\\\\\\\\__/\\\___________________/\\\\\_______/\\\________/\\\__/\\\\\\\\\\\\____        
+ ___/\\\/////////\\\_\/\\\_______\/\\\_\/\\\/////////\\\_\/\\\///////////___/\\\///////\\\___\/\\\///////////__\/\\\_________________/\\\///\\\____\///\\\____/\\\/__\/\\\////////\\\__       
+  __\//\\\______\///__\/\\\_______\/\\\_\/\\\_______\/\\\_\/\\\_____________\/\\\_____\/\\\___\/\\\_____________\/\\\_______________/\\\/__\///\\\____\///\\\/\\\/____\/\\\______\//\\\_      
+   ___\////\\\_________\/\\\_______\/\\\_\/\\\\\\\\\\\\\/__\/\\\\\\\\\\\_____\/\\\\\\\\\\\/____\/\\\\\\\\\\\_____\/\\\______________/\\\______\//\\\_____\///\\\/______\/\\\_______\/\\\_     
+    ______\////\\\______\/\\\_______\/\\\_\/\\\/////////____\/\\\///////______\/\\\//////\\\____\/\\\///////______\/\\\_____________\/\\\_______\/\\\_______\/\\\_______\/\\\_______\/\\\_    
+     _________\////\\\___\/\\\_______\/\\\_\/\\\_____________\/\\\_____________\/\\\____\//\\\___\/\\\_____________\/\\\_____________\//\\\______/\\\________\/\\\_______\/\\\_______\/\\\_   
+      __/\\\______\//\\\__\//\\\______/\\\__\/\\\_____________\/\\\_____________\/\\\_____\//\\\__\/\\\_____________\/\\\______________\///\\\__/\\\__________\/\\\_______\/\\\_______/\\\__  
+       _\///\\\\\\\\\\\/____\///\\\\\\\\\/___\/\\\_____________\/\\\\\\\\\\\\\\\_\/\\\______\//\\\_\/\\\_____________\/\\\\\\\\\\\\\\\____\///\\\\\/___________\/\\\_______\/\\\\\\\\\\\\/___ 
+        ___\///////////________\/////////_____\///______________\///////////////__\///________\///__\///______________\///////////////_______\/////_____________\///________\////////////_____`
+	} else {
+		floydASCII = `    __/\\\\\\\\\\\\\\\___/\\\____________________/\\\\\________/\\\________/\\\___/\\\\\\\\\\\\_______________
      _\/\\\///////////___\/\\\__________________/\\\///\\\_____\///\\\____/\\\/___\/\\\////////\\\_____________
       _\/\\\______________\/\\\________________/\\\/__\///\\\_____\///\\\/\\\/_____\/\\\______\//\\\____________
        _\/\\\\\\\\\\\______\/\\\_______________/\\\______\//\\\______\///\\\/_______\/\\\_______\/\\\____________
@@ -51,6 +65,7 @@ func Render(s *styles.Styles, version string, compact bool, o Opts) string {
           _\/\\\______________\/\\\_______________\///\\\__/\\\___________\/\\\________\/\\\_______/\\\_____________
            _\/\\\______________\/\\\\\\\\\\\\\\\_____\///\\\\\/____________\/\\\________\/\\\\\\\\\\\\/______________
             _\///_______________\///////////////________\/////______________\///_________\////////////________________`
+	}
 
 	floydWidth := lipgloss.Width(floydASCII)
 
@@ -125,12 +140,26 @@ func Render(s *styles.Styles, version string, compact bool, o Opts) string {
 	return logo
 }
 
+// isSuperFloyd detects if running as SuperFloyd binary
+func isSuperFloyd() bool {
+	name := strings.ToLower(filepath.Base(os.Args[0]))
+	return strings.Contains(name, "superfloyd")
+}
+
 // SmallRender renders a smaller version of the Floyd logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int) string {
 	title := t.Base.Foreground(t.Secondary).Render("LEGACY AI™")
-	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t, "FLOYD", t.Secondary, t.Primary))
-	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after "FLOYD"
+	brandName := "FLOYD"
+	if isSuperFloyd() {
+		// SuperFloyd: show SUPER over FLOYD with gradient
+		superTxt := styles.ApplyBoldForegroundGrad(t, "SUPER", t.Primary, t.Secondary)
+		floydTxt := styles.ApplyBoldForegroundGrad(t, "FLOYD", t.Secondary, t.Tertiary)
+		title = fmt.Sprintf("%s\n%s %s", title, superTxt, floydTxt)
+	} else {
+		title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t, brandName, t.Secondary, t.Primary))
+	}
+	remainingWidth := width - lipgloss.Width(title) - 1
 	if remainingWidth > 0 {
 		lines := strings.Repeat("╱", remainingWidth)
 		title = fmt.Sprintf("%s %s", title, t.Base.Foreground(t.Primary).Render(lines))
@@ -147,13 +176,27 @@ func SidebarRender(s *styles.Styles, width int, o Opts) string {
 
 	legacyai := fg(o.CharmColor, "Legacy AI")
 
-	artLines := []string{
-		"░█▀▀░█░░░█▀█░█░█░█▀▄",
-		"░█▀▀░█░░░█░█░░█░░█░█",
-		"░▀░░░▀▀▀░▀▀▀░░▀░░▀▀░",
-		"░█▀▀░█▀█░█▀▄░█▀▀░░░░",
-		"░█░░░█░█░█░█░█▀▀░░░░",
-		"░▀▀▀░▀▀▀░▀▀░░▀▀▀░░░░",
+	var artLines []string
+	if isSuperFloyd() {
+		// SuperFloyd sidebar art
+		artLines = []string{
+			"░█▀▀░█░█░█▀█░█▀▀░█▀▄",
+			"░▀▀█░█░█░█▀▀░█▀▀░█▀▄",
+			"░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀",
+			"░█▀▀░█░░░█▀█░█░█░█▀▄",
+			"░█▀▀░█░░░█░█░░█░░█░█",
+			"░▀░░░▀▀▀░▀▀▀░░▀░░▀▀░",
+		}
+	} else {
+		// Standard FLOYD art
+		artLines = []string{
+			"░█▀▀░█░░░█▀█░█░█░█▀▄",
+			"░█▀▀░█░░░█░█░░█░░█░█",
+			"░▀░░░▀▀▀░▀▀▀░░▀░░▀▀░",
+			"░█▀▀░█▀█░█▀▄░█▀▀░░░░",
+			"░█░░░█░█░█░█░█▀▀░░░░",
+			"░▀▀▀░▀▀▀░▀▀░░▀▀▀░░░░",
+		}
 	}
 
 	// Pad each art line with diagonal field characters to fill the width.
@@ -186,6 +229,35 @@ func SidebarRender(s *styles.Styles, width int, o Opts) string {
 		result = strings.Join(lines, "\n")
 	}
 	return result
+}
+
+// PersistentBar renders a persistent SuperFloyd branding bar for above the chat input.
+// Returns empty string for non-SuperFloyd binaries.
+func PersistentBar(s *styles.Styles, width int) string {
+	if !isSuperFloyd() {
+		return ""
+	}
+
+	// SuperFloyd persistent ASCII art (85 chars wide)
+	artLines := []string{
+		"███████╗██╗   ██╗██████╗ ███████╗██████╗ ███████╗██╗      ██████╗ ██╗   ██╗██████╗ ",
+		"██╔════╝██║   ██║██╔══██╗██╔════╝██╔══██╗██╔════╝██║     ██╔═══██╗╚██╗ ██╔╝██╔══██╗",
+		"███████╗██║   ██║██████╔╝█████╗  ██████╔╝█████╗  ██║     ██║   ██║ ╚████╔╝ ██║  ██║",
+		"╚════██║██║   ██║██╔═══╝ ██╔══╝  ██╔══██╗██╔══╝  ██║     ██║   ██║  ╚██╔╝  ██║  ██║",
+		"███████║╚██████╔╝██║     ███████╗██║  ██║██║     ███████╗╚██████╔╝   ██║   ██████╔╝",
+		"╚══════╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝    ╚═╝   ╚═════╝ ",
+	}
+
+	b := new(strings.Builder)
+	for _, line := range artLines {
+		// Truncate or pad line to width
+		if width > 0 && lipgloss.Width(line) > width {
+			line = ansi.Truncate(line, width, "")
+		}
+		// Apply Red to White gradient
+		fmt.Fprintln(b, styles.ApplyForegroundGrad(s, line, s.Primary, s.Secondary))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // renderWord renders letterforms to fork a word. stretchIndex is the index of

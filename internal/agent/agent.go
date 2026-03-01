@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -51,6 +52,14 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// Auto-summarize threshold - triggers compaction at 70% context
+	// This runs BEFORE handoff to extend session life
+	summarizeThresholdPercent = 70.0
+
+	// Handoff threshold - triggers graceful exit at 95% context
+	// This ALWAYS runs regardless of disableAutoSummarize flag
+	handoffThresholdPercent = 95.0
 )
 
 //go:embed templates/title.md
@@ -316,11 +325,51 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		slog.Debug("preparePrompt file", "idx", i, "filename", f.Filename, "media_type", f.MediaType, "data_len", len(f.Data))
 	}
 
+	// PRE-FLIGHT TOKEN CHECK: Estimate tokens before API call to prevent crashes
+	// This fixes the token tracking discrepancy where displayed tokens (from last API response)
+	// don't account for new file contents being added to this request
+	// CRITICAL: Display underestimates by ~43% (140k shown = 200k actual with 202k window)
+	// Must use 50% threshold to hand off BEFORE actual limit is reached
+	contextWindow := int64(largeModel.CatwalkCfg.ContextWindow)
+	if largeModel.ModelCfg.ContextWindow > 0 {
+		contextWindow = largeModel.ModelCfg.ContextWindow
+	}
+	estimatedTokens := estimateTokensFromPrompt(history, files, call.Prompt, call.Attachments)
+	estimatedPercent := (float64(estimatedTokens) / float64(contextWindow)) * 100
+	slog.Debug("pre-flight token estimate", "estimated_tokens", estimatedTokens, "context_window", contextWindow, "percent", estimatedPercent)
+
+	// If estimated tokens exceed 50%, trigger early handoff to prevent API crash
+	// CRITICAL: 50% displayed ≈ 71% actual (144k / 202k) - safe handoff point
+	// 60% displayed ≈ 86% actual (173k / 202k) - risky
+	// 70% displayed ≈ 99% actual (200k / 202k) - TOO LATE, already crashing
+	if estimatedPercent >= 50.0 {
+		slog.Warn("pre-flight token check: approaching limit, triggering early handoff",
+			"estimated_tokens", estimatedTokens,
+			"context_window", contextWindow,
+			"percent", estimatedPercent,
+		)
+		// Create handoff file immediately
+		handoffErr := a.createHandoffFile(ctx, call.SessionID)
+		if handoffErr != nil {
+			slog.Error("failed to create handoff file during pre-flight check", "error", handoffErr)
+		}
+		// Return early with handoff message - use string response directly
+		handoffMsg := fmt.Sprintf("⚠️ Context limit approaching (%.1f%% estimated). Session handoff initiated to preserve your work.\n\nPlease restart the session to continue.", estimatedPercent)
+		return &fantasy.AgentResult{
+			Response: fantasy.Response{
+				Content: fantasy.ResponseContent{
+					fantasy.TextContent{Text: handoffMsg},
+				},
+			},
+		}, nil
+	}
+
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	var shouldHandoff bool
 
 	result, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 		return agent.Stream(genCtx, fantasy.AgentStreamCall{
@@ -418,6 +467,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 
 				currentAssistant = &assistantMsg
+
+				// EMERGENCY BRAKE: Check if a tool just injected a massive payload
+				cw := int64(largeModel.CatwalkCfg.ContextWindow)
+				if largeModel.ModelCfg.ContextWindow > 0 {
+					cw = largeModel.ModelCfg.ContextWindow
+				}
+				estTokens := estimateTokensFromPrompt(prepared.Messages, files, call.Prompt, call.Attachments)
+				if (float64(estTokens) / float64(cw)) > 0.85 {
+					// Abort the API call and force the orchestrator to run Summarize()
+					shouldSummarize = true
+					return callContext, prepared, fmt.Errorf("context spike detected: forcing emergency compaction")
+				}
+
 				return callContext, prepared, err
 			},
 			OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -521,21 +583,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 			StopWhen: []fantasy.StopCondition{
 				func(_ []fantasy.StepResult) bool {
-					// Use override context window if set, otherwise use catwalk's value
 					cw := int64(largeModel.CatwalkCfg.ContextWindow)
 					if largeModel.ModelCfg.ContextWindow > 0 {
 						cw = largeModel.ModelCfg.ContextWindow
 					}
 					tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-					remaining := cw - tokens
-					var threshold int64
-					if cw >= largeContextWindowThreshold {
-						threshold = largeContextWindowBuffer
-					} else {
-						threshold = int64(float64(cw) * smallContextWindowRatio)
-					}
-					if (remaining <= threshold) && !a.disableAutoSummarize {
+					percentUsed := (float64(tokens) / float64(cw)) * 100
+
+					// RESTORED COMPACTION: Trigger at 80% to keep the session alive
+					if percentUsed >= 80.0 {
 						shouldSummarize = true
+						return true
+					}
+
+					// Hard handoff only if it somehow hits 95% despite the brakes
+					if percentUsed >= 95.0 {
+						shouldHandoff = true
 						return true
 					}
 					return false
@@ -663,6 +726,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
+	}
+
+	// Automatic handoff at 95% context — graceful exit without summarization
+	// This is the PRIMARY context limit brake, replacing auto-summarization
+	if shouldHandoff {
+		a.activeRequests.Del(call.SessionID)
+
+		if err := a.createHandoffFile(ctx, call.SessionID); err != nil {
+			slog.Error("failed to create handoff file", "error", err)
+		}
+
+		// Persist the handoff message to the DB so the user sees it in the chat UI
+		handoffMsg := "Context window threshold reached (95%). I have saved our active tasks and session pointer to `HANDOFF.md`. Please start a new session, and I will automatically retrieve our context."
+
+		_, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: handoffMsg},
+			},
+			Model:    largeModel.ModelCfg.Model,
+			Provider: largeModel.ModelCfg.Provider,
+		})
+		if err != nil {
+			slog.Error("failed to save handoff message", "error", err)
+		}
+
+		return result, err
 	}
 
 	// Release active request before processing queued messages.
@@ -956,6 +1046,41 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
+// estimateTokensFromPrompt provides a rough token count estimation before API calls.
+// This is used to prevent crashes when file contents would exceed the context window.
+// Uses a simple heuristic of ~4 characters per token (conservative estimate).
+func estimateTokensFromPrompt(history []fantasy.Message, files []fantasy.FilePart, prompt string, attachments []message.Attachment) int64 {
+	var totalChars int64
+
+	// Count characters in message history by converting to string representation
+	for _, msg := range history {
+		// Use fmt.Sprintf to get string representation of message
+		totalChars += int64(len(fmt.Sprintf("%v", msg)))
+	}
+
+	// Count characters in files
+	for _, file := range files {
+		totalChars += int64(len(file.Data))
+	}
+
+	// Count characters in current prompt
+	totalChars += int64(len(prompt))
+
+	// Count characters in text attachments (non-binary)
+	for _, att := range attachments {
+		if att.IsText() {
+			totalChars += int64(len(att.Content))
+		}
+	}
+
+	// Add overhead for message formatting (~10%)
+	totalChars = int64(float64(totalChars) * 1.1)
+
+	// Convert to tokens (~4 chars per token, being conservative)
+	// Using 3.5 to be extra safe
+	return int64(float64(totalChars) / 3.5)
+}
+
 // generateTitle generates a session titled based on the initial prompt.
 func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
@@ -1151,6 +1276,60 @@ func (a *sessionAgent) Cancel(sessionID string) {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
+}
+
+// createHandoffFile appends a SESSION HANDOFF section to the existing HANDOFF.md.
+// This preserves all Terminal Shadow logs while adding the session pointer.
+func (a *sessionAgent) createHandoffFile(ctx context.Context, sessionID string) error {
+	sess, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session for handoff: %w", err)
+	}
+
+	handoffPath := filepath.Join(a.cfg.WorkingDir(), "HANDOFF.md")
+
+	// Build the handoff section (to be appended, not replace)
+	var sb strings.Builder
+
+	sb.WriteString("\n---\n\n")
+	sb.WriteString("## SESSION HANDOFF\n\n")
+	sb.WriteString(fmt.Sprintf("**Previous Session ID:** %s\n", sessionID))
+	sb.WriteString(fmt.Sprintf("**Session Title:** %s\n", sess.Title))
+	sb.WriteString(fmt.Sprintf("**Reason:** Context window threshold reached (95%%).\n"))
+	sb.WriteString(fmt.Sprintf("**Timestamp:** %s\n\n", time.Now().UTC().Format(time.RFC3339)))
+
+	sb.WriteString("### Active Todos\n\n")
+	if len(sess.Todos) == 0 {
+		sb.WriteString("*No active todos*\n\n")
+	} else {
+		for _, todo := range sess.Todos {
+			statusIcon := "[ ]"
+			if todo.Status == session.TodoStatusCompleted {
+				statusIcon = "[x]"
+			} else if todo.Status == session.TodoStatusInProgress {
+				statusIcon = "[~]"
+			}
+			sb.WriteString(fmt.Sprintf("- %s %s\n", statusIcon, todo.Content))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("### Agent Instruction\n\n")
+	sb.WriteString("Upon starting the new session, immediately use `query_floyd_archive` to retrieve the technical context of the last task worked on in this session.\n")
+
+	// APPEND to existing file, do not overwrite
+	f, err := os.OpenFile(handoffPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open HANDOFF.md for append: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(sb.String()); err != nil {
+		return fmt.Errorf("failed to append handoff section: %w", err)
+	}
+
+	slog.Info("Appended handoff section to HANDOFF.md", "path", handoffPath, "session_id", sessionID)
+	return nil
 }
 
 func (a *sessionAgent) ClearQueue(sessionID string) {

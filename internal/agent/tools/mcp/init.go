@@ -227,13 +227,32 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 }
 
 // WaitForInit blocks until MCP initialization is complete.
-// If Initialize was never called, this returns immediately.
+// It returns nil when initialization finishes, or ctx.Err() on cancellation/timeout.
 func WaitForInit(ctx context.Context) error {
 	select {
 	case <-initDone:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// WaitForServerConnected blocks until the named MCP server is connected.
+// Returns nil when connected, or ctx.Err()/timeout if not connected in time.
+func WaitForServerConnected(ctx context.Context, name string) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if state, ok := GetState(name); ok && state.State == StateConnected {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
 }
 

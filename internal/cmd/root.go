@@ -14,12 +14,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/colorprofile"
-	"github.com/charmbracelet/fang"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/charmbracelet/x/term"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/app"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/db"
@@ -29,6 +23,12 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/common"
 	ui "github.com/CaptainPhantasy/FloydSandyIso/internal/ui/model"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/version"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/fang"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -80,6 +80,8 @@ func init() {
 		schemaCmd,
 		loginCmd,
 		statsCmd,
+		scoreboardCmd,
+		doctorCmd,
 	)
 }
 
@@ -189,7 +191,11 @@ const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{
 func Execute() {
 	for _, arg := range os.Args[1:] {
 		if arg == "--version" || arg == "-v" {
-			fmt.Printf("floyd version %s\n", version.Version)
+			name := rootCmd.Use
+			if strings.TrimSpace(name) == "" {
+				name = "floyd"
+			}
+			fmt.Printf("%s version %s\n", name, version.Version)
 			return
 		}
 	}
@@ -280,6 +286,10 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		cfg.Permissions = &config.Permissions{}
 	}
 	cfg.Permissions.SkipRequests = yolo
+
+	if err := enforceConsistencyLock(cfg); err != nil {
+		return nil, err
+	}
 
 	if err := createDotFloydDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err

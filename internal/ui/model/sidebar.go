@@ -54,24 +54,11 @@ func (m *UI) modelInfo(width int) string {
 			} else {
 				contextWindow = int64(model.CatwalkCfg.ContextWindow)
 			}
-
-			// Calculate both total and effective tokens for dual display
-			totalTokens := m.session.CompletionTokens + m.session.PromptTokens
-			effectiveTokens := totalTokens - m.session.CacheReadTokens
-
-			// Calculate cache percentage
-			cachePercent := 0.0
-			if totalTokens > 0 {
-				cachePercent = (float64(m.session.CacheReadTokens) / float64(totalTokens)) * 100
-			}
-
+			contextUsed := m.session.CompletionTokens + m.session.PromptTokens
 			modelContext = &common.ModelContextInfo{
-				TotalTokens:     totalTokens,
-				EffectiveTokens: effectiveTokens,
-				CacheReadTokens: m.session.CacheReadTokens,
-				CachePercent:    cachePercent,
-				ModelContext:    contextWindow,
-				Cost:            m.session.Cost,
+				ContextUsed:  contextUsed,
+				Cost:         m.session.Cost,
+				ModelContext: contextWindow,
 			}
 		}
 	}
@@ -150,8 +137,6 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		cwd,
 		"",
 		m.modelInfo(width),
-		"",
-		m.promptQuotaInfo(width),
 		"",
 	}
 

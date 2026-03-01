@@ -175,9 +175,8 @@ type UI struct {
 	caps common.Capabilities
 
 	// Editor components
-	textarea          textarea.Model
-	commandSuggestion string
-	aiSuggestion      string // AI-generated followup suggestion
+	textarea     textarea.Model
+	aiSuggestion string // AI-generated followup suggestion
 
 	// Attachment list
 	attachments *attachments.Attachments
@@ -371,10 +370,6 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 	m.focus = focus
 	// Changing the state may change layout, so update it.
 	m.updateLayoutAndSize()
-	// Update command suggestion when focus changes to editor
-	if focus == uiFocusEditor {
-		m.updateCommandSuggestion()
-	}
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
@@ -455,8 +450,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiSuggestionMsg:
 		m.aiSuggestion = string(msg)
 		slog.Debug("AI suggestion received", "suggestion", m.aiSuggestion, "focus", m.focus, "textareaFocused", m.textarea.Focused())
-		m.updateCommandSuggestion()
-		slog.Debug("After updateCommandSuggestion", "commandSuggestion", m.commandSuggestion)
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -488,7 +481,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
-		m.updateCommandSuggestion()
 
 	case promptUsageLoadedMsg:
 		m.localUserMessages = msg.userMessages
@@ -1740,7 +1732,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				// Otherwise, send the message
 				m.textarea.Reset()
-				m.updateCommandSuggestion()
 
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
@@ -1774,9 +1765,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Tab):
-				if m.acceptCommandSuggestion() {
-					break
-				}
 				if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
@@ -1790,7 +1778,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
 			case key.Matches(msg, m.keyMap.Editor.AcceptSuggestion):
-				slog.Debug("AcceptSuggestion key pressed", "aiSuggestion", m.aiSuggestion, "commandSuggestion", m.commandSuggestion, "textareaValue", m.textarea.Value())
+				slog.Debug("AcceptSuggestion key pressed", "aiSuggestion", m.aiSuggestion, "textareaValue", m.textarea.Value())
 				if m.acceptCommandSuggestion() {
 					slog.Debug("Suggestion accepted successfully")
 				} else {
@@ -1856,7 +1844,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				// Any text modification becomes the current draft.
 				m.updateHistoryDraft(curValue)
-				m.updateCommandSuggestion()
 
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
@@ -1888,7 +1875,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.focus = uiFocusEditor
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
-				m.updateCommandSuggestion()
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -2146,7 +2132,7 @@ func (m *UI) View() tea.View {
 
 	content = strings.Join(contentLines, "\n")
 
-	v.Content = content
+	v.Content = lipgloss.NewLayer(content)
 	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
@@ -2425,6 +2411,10 @@ func (m *UI) generateLayout(w, h int) layout {
 	helpHeight := 1
 	// The editor height
 	editorHeight := 5
+	// Add extra height for SuperFloyd persistent bar (6 lines)
+	if styles.IsSuperFloydBinary() {
+		editorHeight += 6
+	}
 	// The sidebar width
 	sidebarWidth := 30
 	// The header height
@@ -2662,7 +2652,7 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		tmpfile.Name(),
 		editor.AtPosition(
 			m.textarea.Line()+1,
-			m.textarea.Column()+1,
+			m.textarea.LineInfo().ColumnOffset+1,
 		),
 	)
 	if err != nil {
@@ -2858,101 +2848,51 @@ func (m *UI) randomizePlaceholders() {
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
+// updateCommandSuggestion is deprecated - AI suggestion uses placeholder directly.
+// This is kept for compatibility but does nothing.
 func (m *UI) updateCommandSuggestion() {
-	if m.focus != uiFocusEditor || !m.textarea.Focused() {
-		m.commandSuggestion = ""
-		return
-	}
-	if m.completionsOpen {
-		m.commandSuggestion = ""
-		return
-	}
-	value := m.textarea.Value()
-	if strings.Contains(value, "\n") {
-		m.commandSuggestion = ""
-		return
-	}
-
-	// AI suggestion takes priority when editor is empty
-	if value == "" && m.aiSuggestion != "" {
-		m.commandSuggestion = m.aiSuggestion
-		return
-	}
-
-	// Clear AI suggestion once user starts typing
-	if value != "" {
-		m.aiSuggestion = ""
-	}
-
-	// Fall back to history-based suggestions
-	for i := len(m.promptHistory.messages) - 1; i >= 0; i-- {
-		candidate := strings.TrimSpace(m.promptHistory.messages[i])
-		if candidate == "" {
-			continue
-		}
-		if value == "" {
-			m.commandSuggestion = candidate
-			return
-		}
-		if strings.HasPrefix(strings.ToLower(candidate), strings.ToLower(value)) && !strings.EqualFold(candidate, value) {
-			m.commandSuggestion = candidate
-			return
-		}
-	}
-	m.commandSuggestion = ""
+	// No-op: AI suggestion is shown via placeholder, not ghost text
 }
 
-func (m *UI) commandSuggestionSuffix() string {
-	if m.commandSuggestion == "" || !m.textarea.Focused() {
-		return ""
-	}
-	value := m.textarea.Value()
-	if strings.Contains(value, "\n") {
-		return ""
-	}
-	cur := m.textarea.Cursor()
-	valueRunes := []rune(value)
-	if cur == nil || cur.Y != 0 || cur.X != len(valueRunes) {
-		return ""
-	}
-	if !strings.HasPrefix(strings.ToLower(m.commandSuggestion), strings.ToLower(value)) {
-		return ""
-	}
-	suggestionRunes := []rune(m.commandSuggestion)
-	if len(suggestionRunes) <= len(valueRunes) {
-		return ""
-	}
-	return string(suggestionRunes[len(valueRunes):])
-}
-
+// acceptCommandSuggestion accepts the AI suggestion placeholder.
+// Press ` to populate the textarea with the AI-generated suggestion.
 func (m *UI) acceptCommandSuggestion() bool {
-	suffix := m.commandSuggestionSuffix()
-	if suffix == "" {
+	// Only works if textarea is empty and we have an AI suggestion
+	if m.aiSuggestion == "" {
 		return false
 	}
-	m.textarea.InsertString(suffix)
+	value := m.textarea.Value()
+	if value != "" {
+		return false
+	}
+	// Populate textarea with the AI suggestion
+	m.textarea.SetValue(m.aiSuggestion)
 	m.textarea.MoveToEnd()
-	m.updateCommandSuggestion()
+	// Clear the suggestion after accepting
+	m.aiSuggestion = ""
 	return true
 }
 
+// renderEditorSuggestion is deprecated - no ghost text rendering needed.
+// AI suggestion is shown via placeholder mechanism.
 func (m *UI) renderEditorSuggestion(view string) string {
-	suffix := m.commandSuggestionSuffix()
-	if suffix == "" {
-		return view
-	}
-	lines := strings.Split(view, "\n")
-	lineIndex := m.textarea.Line()
-	if lineIndex < 0 || lineIndex >= len(lines) {
-		return view
-	}
-	lines[lineIndex] = lines[lineIndex] + m.com.Styles.EditorGhostSuggestion.Render(suffix)
-	return strings.Join(lines, "\n")
+	return view
 }
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
 	editorView := m.renderEditorSuggestion(m.textarea.View())
+
+	// Add SuperFloyd persistent bar above editor (only for SuperFloyd binary)
+	persistentBar := logo.PersistentBar(m.com.Styles, width)
+	if persistentBar != "" {
+		editorView = lipgloss.JoinVertical(
+			lipgloss.Top,
+			persistentBar,
+			editorView,
+		)
+	}
+
 	if len(m.attachments.List()) == 0 {
 		return editorView
 	}

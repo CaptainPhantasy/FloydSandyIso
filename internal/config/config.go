@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/invopop/jsonschema"
 	hyperp "github.com/CaptainPhantasy/FloydSandyIso/internal/agent/hyper"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/csync"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/env"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/oauth"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/oauth/copilot"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/oauth/hyper"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -153,9 +153,9 @@ func (pc *ProviderConfig) SetupGitHubCopilot() {
 type MCPType string
 
 const (
-	MCPStdio         MCPType = "stdio"
-	MCPSSE           MCPType = "sse"
-	MCPHttp          MCPType = "http"
+	MCPStdio          MCPType = "stdio"
+	MCPSSE            MCPType = "sse"
+	MCPHttp           MCPType = "http"
 	MCPStreamableHttp MCPType = "streamable-http" // MCP 2.0 streamable HTTP transport
 )
 
@@ -189,11 +189,11 @@ type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 
-	Completions  Completions  `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent  *bool        `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	RateLimit    *RateLimitConfig   `json:"rate_limit,omitempty" jsonschema:"description=API rate limiting settings"`
-	PromptQuota  *PromptQuotaConfig `json:"prompt_quota,omitempty" jsonschema:"description=Prompt usage quota display settings"`
-	Shadow       *ShadowConfig      `json:"shadow,omitempty" jsonschema:"description=Shadow daemon integration settings"`
+	Completions Completions        `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool              `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	RateLimit   *RateLimitConfig   `json:"rate_limit,omitempty" jsonschema:"description=API rate limiting settings"`
+	PromptQuota *PromptQuotaConfig `json:"prompt_quota,omitempty" jsonschema:"description=Prompt usage quota display settings"`
+	Shadow      *ShadowConfig      `json:"shadow,omitempty" jsonschema:"description=Shadow daemon integration settings"`
 }
 
 // Completions defines options for the completions UI.
@@ -284,14 +284,14 @@ type FileOps struct {
 }
 
 type Execution struct {
-	Shell                  string   `json:"shell,omitempty" jsonschema:"description=Shell to use for command execution,example=/bin/bash"`
-	TimeoutSeconds         int      `json:"timeout_seconds,omitempty" jsonschema:"description=Default timeout in seconds for command execution,default=30,example=30"`
-	MaxBufferBytes         int      `json:"max_buffer_bytes,omitempty" jsonschema:"description=Maximum output size in bytes to capture,default=5242880,example=5242880"`
-	AllowedPrefixes        []string `json:"allowed_prefixes,omitempty" jsonschema:"description=Allowed command prefixes (optional allowlist)"`
-	AllowedPatterns        []string `json:"allowed_patterns,omitempty" jsonschema:"description=Allowed command regex patterns (optional allowlist)"`
-	DeniedPrefixes         []string `json:"denied_prefixes,omitempty" jsonschema:"description=Denied command prefixes (optional denylist)"`
-	DeniedPatterns         []string `json:"denied_patterns,omitempty" jsonschema:"description=Denied command regex patterns (optional denylist)"`
-	AllowedBannedCommands  []string `json:"allowed_banned_commands,omitempty" jsonschema:"description=Commands from the banned list to allow (e.g., curl, wget, ssh),example=curl,example=wget"`
+	Shell                 string   `json:"shell,omitempty" jsonschema:"description=Shell to use for command execution,example=/bin/bash"`
+	TimeoutSeconds        int      `json:"timeout_seconds,omitempty" jsonschema:"description=Default timeout in seconds for command execution,default=30,example=30"`
+	MaxBufferBytes        int      `json:"max_buffer_bytes,omitempty" jsonschema:"description=Maximum output size in bytes to capture,default=5242880,example=5242880"`
+	AllowedPrefixes       []string `json:"allowed_prefixes,omitempty" jsonschema:"description=Allowed command prefixes (optional allowlist)"`
+	AllowedPatterns       []string `json:"allowed_patterns,omitempty" jsonschema:"description=Allowed command regex patterns (optional allowlist)"`
+	DeniedPrefixes        []string `json:"denied_prefixes,omitempty" jsonschema:"description=Denied command prefixes (optional denylist)"`
+	DeniedPatterns        []string `json:"denied_patterns,omitempty" jsonschema:"description=Denied command regex patterns (optional denylist)"`
+	AllowedBannedCommands []string `json:"allowed_banned_commands,omitempty" jsonschema:"description=Commands from the banned list to allow (e.g., curl, wget, ssh),example=curl,example=wget"`
 }
 
 type MCPs map[string]MCPConfig
@@ -744,6 +744,9 @@ func allToolNames() []string {
 		"bash",
 		"parallel_bash",
 		"context_status",
+		"complexity_estimator",
+		"refactor_blueprint",
+		"failure_mode_enumerator",
 		"job_output",
 		"job_kill",
 		"download",
@@ -753,7 +756,6 @@ func allToolNames() []string {
 		"lsp_references",
 		"lsp_restart",
 		"fetch",
-		"agentic_fetch",
 		"glob",
 		"grep",
 		"ls",
@@ -813,8 +815,8 @@ func (c *Config) SetupAgents() {
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
-			// NO MCPs or LSPs by default
-			AllowedMCP: map[string][]string{},
+			// Deterministic behavior: allow MCP tools by default unless explicitly restricted.
+			AllowedMCP: nil,
 		},
 	}
 	c.Agents = agents

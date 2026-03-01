@@ -2,6 +2,8 @@ package model
 
 import "charm.land/bubbles/v2/key"
 
+const AcceptSuggestionPrimaryBinding = "`"
+
 type KeyMap struct {
 	Editor struct {
 		AddFile     key.Binding
@@ -155,8 +157,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("down"),
 	)
 	km.Editor.AcceptSuggestion = key.NewBinding(
-		key.WithKeys("ctrl+y"),
-		key.WithHelp("ctrl+y", "accept suggestion"),
+		key.WithKeys(AcceptSuggestionPrimaryBinding),
+		key.WithHelp("`", "accept suggestion"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(
