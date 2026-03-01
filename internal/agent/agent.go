@@ -878,11 +878,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
 
-	// Just in case, get just the last usage info.
-	usage := resp.Response.Usage
+	// Save the summary message ID but preserve cumulative token counts.
+	// Summarization is a side request - it should NOT reset the session's
+	// actual context consumption. The main conversation still consumed those tokens.
 	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = usage.OutputTokens
-	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
 	return err
 }

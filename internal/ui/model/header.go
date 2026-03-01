@@ -209,8 +209,9 @@ func renderHeaderDetails(
 	contextWindow := config.Get().GetModelContextWindow(agentCfg.Model)
 	var percentage float64
 	if contextWindow > 0 {
-		// Subtract cache read tokens - they don't consume fresh context
-		contextUsed := session.CompletionTokens + session.PromptTokens - session.CacheReadTokens
+		// Use TOTAL tokens - cached tokens still consume context window space
+		// even though they cost less. Showing effective = flying blind.
+		contextUsed := session.CompletionTokens + session.PromptTokens
 		percentage = (float64(contextUsed) / float64(contextWindow)) * 100
 	}
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
