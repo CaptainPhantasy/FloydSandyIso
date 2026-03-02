@@ -53,10 +53,6 @@ const (
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
 
-	// Auto-summarize threshold - triggers compaction at 70% context
-	// This runs BEFORE handoff to extend session life
-	summarizeThresholdPercent = 70.0
-
 	// Handoff threshold - triggers graceful exit at 95% context
 	// This ALWAYS runs regardless of disableAutoSummarize flag
 	handoffThresholdPercent = 95.0

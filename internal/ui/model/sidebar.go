@@ -27,16 +27,12 @@ func (m *UI) modelInfo(width int) string {
 
 			// Only check reasoning if model can reason
 			if model.CatwalkCfg.CanReason {
-				if model.ModelCfg.ReasoningEffort == "" {
-					if model.ModelCfg.Think {
-						reasoningInfo = "Thinking On"
-					} else {
-						reasoningInfo = "Thinking Off"
-					}
-				} else {
+				if model.ModelCfg.Think {
 					formatter := cases.Title(language.English, cases.NoLower)
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort, "medium")
 					reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
+				} else {
+					reasoningInfo = "Thinking Off"
 				}
 			}
 		}

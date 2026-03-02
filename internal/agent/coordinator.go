@@ -285,10 +285,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	switch providerType {
 	case openai.Name, azure.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		// FIX: Only inject reasoning_effort if Think toggle is ON
-		if !hasReasoningEffort && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
+		if model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		} else if !model.ModelCfg.Think {
+			delete(mergedOptions, "reasoning_effort")
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
@@ -306,12 +306,16 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 	case anthropic.Name:
-		_, hasThink := mergedOptions["thinking"]
-		if !hasThink && model.ModelCfg.Think {
-			mergedOptions["thinking"] = map[string]any{
-				// TODO: kujtim see if we need to make this dynamic
-				"budget_tokens": 2000,
+		if model.ModelCfg.Think {
+			_, hasThink := mergedOptions["thinking"]
+			if !hasThink {
+				mergedOptions["thinking"] = map[string]any{
+					// TODO: kujtim see if we need to make this dynamic
+					"budget_tokens": 2000,
+				}
 			}
+		} else {
+			delete(mergedOptions, "thinking")
 		}
 		parsed, err := anthropic.ParseOptions(mergedOptions)
 		if err == nil {
@@ -319,49 +323,52 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	case openrouter.Name:
-		_, hasReasoning := mergedOptions["reasoning"]
-		// FIX: Only inject reasoning if Think toggle is ON
-		if !hasReasoning && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
+		if model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
 				"effort":  model.ModelCfg.ReasoningEffort,
 			}
+		} else if !model.ModelCfg.Think {
+			delete(mergedOptions, "reasoning")
 		}
 		parsed, err := openrouter.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openrouter.Name] = parsed
 		}
 	case vercel.Name:
-		_, hasReasoning := mergedOptions["reasoning"]
-		// FIX: Only inject reasoning if Think toggle is ON
-		if !hasReasoning && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
+		if model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
 				"effort":  model.ModelCfg.ReasoningEffort,
 			}
+		} else if !model.ModelCfg.Think {
+			delete(mergedOptions, "reasoning")
 		}
 		parsed, err := vercel.ParseOptions(mergedOptions)
 		if err == nil {
 			options[vercel.Name] = parsed
 		}
 	case google.Name:
-		_, hasReasoning := mergedOptions["thinking_config"]
-		// FIX: Only inject thinking_config if Think toggle is ON
-		if !hasReasoning && model.ModelCfg.Think {
-			mergedOptions["thinking_config"] = map[string]any{
-				"thinking_budget":  2000,
-				"include_thoughts": true,
+		if model.ModelCfg.Think {
+			_, hasReasoning := mergedOptions["thinking_config"]
+			if !hasReasoning {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_budget":  2000,
+					"include_thoughts": true,
+				}
 			}
+		} else {
+			delete(mergedOptions, "thinking_config")
 		}
 		parsed, err := google.ParseOptions(mergedOptions)
 		if err == nil {
 			options[google.Name] = parsed
 		}
 	case openaicompat.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		// FIX: Only inject reasoning_effort if Think toggle is ON
-		if !hasReasoningEffort && model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
+		if model.ModelCfg.Think && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		} else if !model.ModelCfg.Think {
+			delete(mergedOptions, "reasoning_effort")
 		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
