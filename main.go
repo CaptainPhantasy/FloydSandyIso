@@ -18,6 +18,7 @@ func main() {
 	if len(os.Args) > 0 {
 		binName = filepath.Base(os.Args[0])
 		cmd.SetRootUse(binName)
+		cmd.SetupSuperFloydMode(binName)
 	}
 
 	// Isolate SuperFloyd runtime roots automatically unless explicitly overridden.

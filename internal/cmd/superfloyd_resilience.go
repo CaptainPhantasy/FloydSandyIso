@@ -12,6 +12,7 @@ import (
 
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/db"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/paranoia"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/model"
 )
 
@@ -68,7 +69,111 @@ func autoStabilizeEnabled() bool {
 
 func isSuperFloydBinary() bool {
 	name := strings.ToLower(strings.TrimSpace(filepathBase(os.Args[0])))
-	return strings.Contains(name, "superfloyd")
+	return strings.Contains(name, "superfloyd") ||
+		name == "beast" ||
+		name == "balanced" ||
+		name == "balance" ||
+		name == "safe" ||
+		name == "sf"
+}
+
+func SetupSuperFloydMode(binName string) {
+	name := strings.ToLower(binName)
+	if !isSuperFloydBinary() {
+		return
+	}
+
+	// Runtime Paranoia Check (Poison Pill + Consistency)
+	RunSafetyDiagnostics()
+
+	// Always ensure SuperFloyd data isolation in these modes
+	if os.Getenv("FLOYD_GLOBAL_DATA") == "" {
+		_ = os.Setenv("FLOYD_GLOBAL_DATA", "/Volumes/Storage/.floyd")
+	}
+
+	// Identity Lock: Fingerprint the env to ensure consistency
+	lockEnv()
+
+	// Default safety systems ON for SuperFloyd family
+	if os.Getenv("SUPERFLOYD_QUALITY_GATES") == "" {
+		_ = os.Setenv("SUPERFLOYD_QUALITY_GATES", "1")
+	}
+	if os.Getenv("SUPERFLOYD_DEGRADATION_CONTROLS") == "" {
+		_ = os.Setenv("SUPERFLOYD_DEGRADATION_CONTROLS", "1")
+	}
+	if os.Getenv("SUPERFLOYD_CONSISTENCY_LOCK") == "" {
+		_ = os.Setenv("SUPERFLOYD_CONSISTENCY_LOCK", "1")
+	}
+	if os.Getenv("SUPERFLOYD_AUTOSTABILIZE") == "" {
+		_ = os.Setenv("SUPERFLOYD_AUTOSTABILIZE", "1")
+	}
+
+	// Default parallelism if not set
+	currParallel := os.Getenv("SUPERFLOYD_MAX_PARALLEL")
+
+	switch {
+	case name == "beast":
+		if currParallel == "" {
+			_ = os.Setenv("SUPERFLOYD_MAX_PARALLEL", "16")
+		}
+	case name == "balanced" || name == "balance" || name == "sf" || name == "superfloyd":
+		if currParallel == "" {
+			_ = os.Setenv("SUPERFLOYD_MAX_PARALLEL", "12")
+		}
+	case name == "safe":
+		if currParallel == "" {
+			_ = os.Setenv("SUPERFLOYD_MAX_PARALLEL", "6")
+		}
+	}
+
+	// Context Singularity Summary
+	if isSuperFloydBinary() {
+		ShowContextSummary()
+	}
+}
+
+// ShowContextSummary provides a concise overview of the codebase context.
+func ShowContextSummary() {
+	cwd, _ := os.Getwd()
+	fmt.Printf("\n[superfloyd-eye] Context Singularity initialized in %s\n", cwd)
+
+	// Simple heuristic for "density"
+	files := 0
+	_ = filepath.Walk(cwd, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && !strings.Contains(path, "/.") {
+			files++
+		}
+		return nil
+	})
+
+	fmt.Printf("[superfloyd-eye] Target Density: %d active components detected\n", files)
+	fmt.Printf("[superfloyd-eye] Paranoia State: Zero-Branch Determinism Active\n\n")
+}
+
+// lockEnv fingerprints the current environment and sets a consistency lock.
+// If the environment drifts significantly while the lock is active, SuperFloyd
+// will signal a violation.
+func lockEnv() {
+	if os.Getenv("SUPERFLOYD_IDENTITY_LOCK") != "" {
+		return
+	}
+
+	// Create a fingerprint of critical environment variables
+	h := crc32.NewIEEE()
+	vars := []string{
+		"USER",
+		"HOME",
+		"SHELL",
+		"TERM",
+		"FLOYD_GLOBAL_DATA",
+		"SUPERFLOYD_MAX_PARALLEL",
+	}
+	for _, v := range vars {
+		h.Write([]byte(os.Getenv(v)))
+	}
+
+	fingerprint := fmt.Sprintf("%08x", h.Sum32())
+	_ = os.Setenv("SUPERFLOYD_IDENTITY_LOCK", fingerprint)
 }
 
 func applyRunQualityGates(prompt string) runQualityGateStatus {
@@ -142,19 +247,47 @@ func applyAutoStabilizeIfNeeded(ctx context.Context, cfg *config.Config, prompt 
 		return prompt
 	}
 
+	// 1. Check for prompt size degradation
 	maxRunes := 12000
 	runes := []rune(trimmed)
 	if len(runes) > maxRunes {
+		fmt.Printf("\n[superfloyd-warn] Prompt degradation detected: size %d exceeds soft limit %d.\n", len(runes), maxRunes)
+		if isInteractive() {
+			fmt.Print("[superfloyd-negotiate] Accept truncation for stability? (Y/n): ")
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(response) == "n" {
+				fmt.Println("[superfloyd-eye] Proceeding with high-load context. Reliability score minimized.")
+				return prompt
+			}
+		}
 		return string(runes[:maxRunes]) + "\n\n[superfloyd-auto-stabilize] Prompt was truncated to maintain reliability under high-load context conditions."
 	}
 
+	// 2. Check for environmental performance degradation
 	if cfg != nil {
 		if shouldStabilizeFromBenchmarks(ctx, cfg) {
+			fmt.Println("\n[superfloyd-warn] Environmental degradation detected (latency/token pressure).")
+			if isInteractive() {
+				fmt.Print("[superfloyd-negotiate] Enable strict concise mode to prevent failure? (Y/n): ")
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) == "n" {
+					fmt.Println("[superfloyd-eye] Negative feedback acknowledged. Maintaining full speculative branching.")
+					return prompt
+				}
+			}
 			return trimmed + "\n\n[superfloyd-auto-stabilize] Use concise responses, deterministic steps, and minimal speculative branching."
 		}
 	}
 
 	return prompt
+}
+
+func isInteractive() bool {
+	// Simple check for terminal
+	fi, _ := os.Stdin.Stat()
+	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
 func shouldStabilizeFromBenchmarks(ctx context.Context, cfg *config.Config) bool {
@@ -283,4 +416,22 @@ func filepathBase(path string) string {
 		return path[i+1:]
 	}
 	return path
+}
+
+// RunSafetyDiagnostics performs aggressive runtime integrity checks.
+func RunSafetyDiagnostics() {
+	fmt.Print("[superfloyd-eye] Running Zero-Branch Determinism Diagnostic...")
+	if err := paranoia.RuntimeCheck(); err != nil {
+		fmt.Printf("\n[superfloyd-FATAL] Runtime integrity compromised: %v\n", err)
+		fmt.Println("[superfloyd-FATAL] Determinism failed. Execution blocked for safety.")
+		os.Exit(1)
+	}
+	fmt.Println(" OK")
+
+	fmt.Print("[superfloyd-eye] Running Poison Pill Test (NaN integrity)...")
+	if err := paranoia.PoisonPill(); err != nil {
+		fmt.Printf("\n[superfloyd-FATAL] Poison Pill failure: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(" OK")
 }

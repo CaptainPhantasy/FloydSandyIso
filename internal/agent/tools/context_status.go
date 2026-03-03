@@ -59,9 +59,9 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 
 			remaining := contextWindow - totalTokens
 
-			// Warn if approaching handoff threshold (80%+ of TOTAL)
-			// At 95%, automatic handoff will trigger
-			shouldHandoff := percentUsed >= 80.0
+			// Warn if approaching handoff threshold (50%+ of TOTAL)
+			// At 60%, automatic handoff will trigger with compaction
+			shouldHandoff := percentUsed >= 50.0
 
 			status := ContextStatusResponse{
 				PromptTokens:     sess.PromptTokens,
@@ -84,7 +84,7 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 					"⚠️ CONTEXT WARNING: %.1f%% of window used\n"+
 						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
 						"  Remaining: %d tokens | Window: %d\n"+
-						"  At 95%%, session will hand off. Consider being more concise or preparing for handoff.",
+						"  At 60%%, session will compact and continue. Consider being more concise.",
 					percentUsed,
 					totalTokens, effectiveTokens, cachePercent,
 					remaining, contextWindow,

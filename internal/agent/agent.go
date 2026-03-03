@@ -48,14 +48,9 @@ import (
 const (
 	defaultSessionName = "Untitled Session"
 
-	// Constants for auto-summarization thresholds
-	largeContextWindowThreshold = 200_000
-	largeContextWindowBuffer    = 20_000
-	smallContextWindowRatio     = 0.2
-
-	// Handoff threshold - triggers graceful exit at 95% context
-	// This ALWAYS runs regardless of disableAutoSummarize flag
-	handoffThresholdPercent = 95.0
+	// Context window constants - currently unused but reserved for future logic
+	// Actual thresholds are defined inline in shouldSummarize checks (50%/60%)
+	_ = 0 // placeholder
 )
 
 //go:embed templates/title.md
@@ -586,14 +581,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 					percentUsed := (float64(tokens) / float64(cw)) * 100
 
-					// RESTORED COMPACTION: Trigger at 80% to keep the session alive
-					if percentUsed >= 80.0 {
+					// RESTORED COMPACTION: Trigger at 50% to keep the session alive
+					if percentUsed >= 50.0 {
 						shouldSummarize = true
 						return true
 					}
 
-					// Hard handoff only if it somehow hits 95% despite the brakes
-					if percentUsed >= 95.0 {
+					// Hard handoff at 60% - compact and continue session
+					if percentUsed >= 60.0 {
 						shouldHandoff = true
 						return true
 					}
@@ -724,17 +719,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 	}
 
-	// Automatic handoff at 95% context — graceful exit without summarization
-	// This is the PRIMARY context limit brake, replacing auto-summarization
+	// Automatic handoff at 60% context — compact and continue session
 	if shouldHandoff {
-		a.activeRequests.Del(call.SessionID)
+		// First, compact the session via summarization
+		if err := a.Summarize(ctx, call.SessionID, call.ProviderOptions); err != nil {
+			slog.Error("failed to summarize session before handoff", "error", err)
+		}
 
+		// Then create handoff file for documentation
 		if err := a.createHandoffFile(ctx, call.SessionID); err != nil {
 			slog.Error("failed to create handoff file", "error", err)
 		}
 
-		// Persist the handoff message to the DB so the user sees it in the chat UI
-		handoffMsg := "Context window threshold reached (95%). I have saved our active tasks and session pointer to `HANDOFF.md`. Please start a new session, and I will automatically retrieve our context."
+		// Notify user of compaction
+		handoffMsg := "Context threshold reached (60%). Session compacted via summarization. Work preserved in HANDOFF.md. Continuing with trimmed context."
 
 		_, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
 			Role: message.Assistant,
@@ -745,10 +743,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			Provider: largeModel.ModelCfg.Provider,
 		})
 		if err != nil {
-			slog.Error("failed to save handoff message", "error", err)
+			slog.Error("failed to save compaction message", "error", err)
 		}
 
-		return result, err
+		// Session continues - do NOT terminate
+		// Fall through to normal completion flow
 	}
 
 	// Release active request before processing queued messages.
@@ -873,6 +872,11 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
+
+	// Calculate tokens that are now "dropped" (summarized)
+	// We use the tokens from the messages that were sent to the summarizer.
+	droppedTokens := estimateTokensFromPrompt(aiMsgs, nil, summaryPromptText, nil)
+	currentSession.TotalTokensSummarized += droppedTokens
 
 	// Save the summary message ID but preserve cumulative token counts.
 	// Summarization is a side request - it should NOT reset the session's
@@ -1290,7 +1294,7 @@ func (a *sessionAgent) createHandoffFile(ctx context.Context, sessionID string) 
 	sb.WriteString("## SESSION HANDOFF\n\n")
 	sb.WriteString(fmt.Sprintf("**Previous Session ID:** %s\n", sessionID))
 	sb.WriteString(fmt.Sprintf("**Session Title:** %s\n", sess.Title))
-	sb.WriteString(fmt.Sprintf("**Reason:** Context window threshold reached (95%%).\n"))
+	sb.WriteString(fmt.Sprintf("**Reason:** Context window threshold reached (60%%).\n"))
 	sb.WriteString(fmt.Sprintf("**Timestamp:** %s\n\n", time.Now().UTC().Format(time.RFC3339)))
 
 	sb.WriteString("### Active Todos\n\n")

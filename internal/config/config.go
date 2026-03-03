@@ -70,7 +70,7 @@ type SelectedModel struct {
 
 	// Overrides the default model configuration.
 	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
-	ContextWindow    int64    `json:"context_window,omitempty" jsonschema:"description=Override the model's context window size (auto-summarization threshold),example=200000"`
+	ContextWindow    int64    `json:"context_window,omitempty" jsonschema:"description=Override the model's context window size (auto-summarization threshold),example=204800"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
 	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
 	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
@@ -32,6 +33,8 @@ var doctorCmd = &cobra.Command{
 		fmt.Println("║                     SUPERFLOYD DOCTOR                       ║")
 		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 		fmt.Printf("║ Binary lane                : %-31s ║\n", yesNo(isSF))
+		fmt.Printf("║ Active mode                : %-31s ║\n", truncate(strings.ToUpper(cmd.Root().Use), 31))
+		fmt.Printf("║ Max parallelism            : %-31s ║\n", getMaxParallelism())
 		fmt.Printf("║ Quality gates enabled      : %-31s ║\n", yesNo(qualityGatesEnabled()))
 		fmt.Printf("║ Degradation controls       : %-31s ║\n", yesNo(degradationControlsEnabled()))
 		fmt.Printf("║ Consistency lock enabled   : %-31s ║\n", yesNo(consistencyLockEnabled()))
@@ -80,4 +83,11 @@ func truncate(s string, max int) string {
 		return string(r[:max])
 	}
 	return string(r[:max-1]) + "…"
+}
+func getMaxParallelism() string {
+	v := os.Getenv("SUPERFLOYD_MAX_PARALLEL")
+	if v == "" {
+		return "default (1)"
+	}
+	return v
 }
