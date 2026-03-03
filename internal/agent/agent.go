@@ -116,6 +116,29 @@ func withConcurrencyGate[T any](cooldown time.Duration, fn func() (T, error)) (T
 	return fn()
 }
 
+// runWithRateLimit applies rate limiting only for main agents.
+// Sub-agents bypass the global limiter to prevent deadlock with parent.
+func (a *sessionAgent) runWithRateLimit(provider string, fn func() (*fantasy.AgentResult, error)) (*fantasy.AgentResult, error) {
+	// Sub-agents skip rate limiting to prevent deadlock with parent
+	if a.isSubAgent {
+		return fn()
+	}
+	return withRateLimitGate(a.cfg, provider, fn)
+}
+
+// safeStream wraps fantasy.Agent.Stream with panic recovery to gracefully handle
+// panics from external dependencies (e.g., nil pointer dereferences in provider hooks).
+// This provides defensive protection against bugs in the fantasy library.
+func safeStream(agent fantasy.Agent, ctx context.Context, call fantasy.AgentStreamCall) (result *fantasy.AgentResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Recovered from fantasy library panic", "panic", r)
+			err = fmt.Errorf("fantasy library panic: %v", r)
+		}
+	}()
+	return agent.Stream(ctx, call)
+}
+
 type SessionAgentCall struct {
 	SessionID        string
 	Prompt           string
@@ -362,8 +385,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var shouldSummarize bool
 	var shouldHandoff bool
 
-	result, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+	result, err := a.runWithRateLimit(largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
+		return safeStream(agent, genCtx, fantasy.AgentStreamCall{
 			Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 			Files:            files,
 			Messages:         history,
@@ -581,14 +604,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 					percentUsed := (float64(tokens) / float64(cw)) * 100
 
-					// RESTORED COMPACTION: Trigger at 50% to keep the session alive
-					if percentUsed >= 50.0 {
+					// CRUSH-style compaction: Higher thresholds with semantic awareness
+					// Trigger summarization at 85% (allows more context before compaction)
+					if percentUsed >= 85.0 {
 						shouldSummarize = true
 						return true
 					}
 
-					// Hard handoff at 60% - compact and continue session
-					if percentUsed >= 60.0 {
+					// Hard handoff at 95% - compact and continue session
+					// This is the last resort before context overflow
+					if percentUsed >= 95.0 {
 						shouldHandoff = true
 						return true
 					}
@@ -812,7 +837,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	summaryPromptText := buildTieredSummaryPrompt(currentSession.Todos, tc)
 
 	resp, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+		return safeStream(agent, genCtx, fantasy.AgentStreamCall{
 			Prompt:          summaryPromptText,
 			Messages:        aiMsgs,
 			ProviderOptions: opts,
@@ -1118,8 +1143,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Use the small model to generate the title.
 	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	resp, err := withRateLimitGate(a.cfg, model.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-		return agent.Stream(ctx, streamCall)
+	resp, err := withRateLimitGate(a.cfg, smallModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
+		return safeStream(agent, ctx, streamCall)
 	})
 	if err == nil {
 		// We successfully generated a title with the small model.
@@ -1129,8 +1154,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
-		resp, err = withRateLimitGate(a.cfg, model.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-			return agent.Stream(ctx, streamCall)
+		resp, err = withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
+			return safeStream(agent, ctx, streamCall)
 		})
 		if err == nil {
 			slog.Debug("Generated title with large model")

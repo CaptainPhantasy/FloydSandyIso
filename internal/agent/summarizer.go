@@ -18,7 +18,7 @@ type SummarizationLog struct {
 func BuildTieredSummaryPrompt(todos string, tc *TieredContext) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are summarizing a conversation with TIERED COMPRESSION.\n\n")
+	sb.WriteString("You are summarizing a conversation with SEMANTIC TIERED COMPRESSION.\n\n")
 
 	sb.WriteString("## COMPRESSION RULES\n\n")
 
@@ -39,10 +39,25 @@ func BuildTieredSummaryPrompt(todos string, tc *TieredContext) string {
 	sb.WriteString("- Tool calls: Preserve the tool name + purpose, compress result\n")
 	sb.WriteString("- Exploration: Summarize as 'Searched X, found Y'\n")
 	sb.WriteString("- Decisions: Capture what was decided and why\n")
+	sb.WriteString("- Code locations: Preserve file:line references exactly\n")
 
 	// TIER 3 - DISCARD
 	sb.WriteString("\n### TIER 3 - DISCARD (Omit from summary):\n")
 	sb.WriteString(fmt.Sprintf("- %d messages with verbose/duplicate content omitted\n", len(tc.Discard)))
+
+	// Add key decisions section (NEW - semantic importance)
+	if len(tc.KeyDecisions) > 0 {
+		sb.WriteString("\n## KEY DECISIONS (SEMANTIC HIGH-VALUE)\n\n")
+		seenDecisions := make(map[string]bool)
+		for _, decision := range tc.KeyDecisions {
+			if !seenDecisions[decision] {
+				sb.WriteString("- ")
+				sb.WriteString(decision)
+				sb.WriteString("\n")
+				seenDecisions[decision] = true
+			}
+		}
+	}
 
 	// Add file operations summary
 	if len(tc.FileOperations) > 0 {
@@ -84,11 +99,12 @@ func BuildTieredSummaryPrompt(todos string, tc *TieredContext) string {
 	sb.WriteString("\n## SUMMARY SECTIONS\n\n")
 	sb.WriteString("1. **Original Request** - The exact user request (from TIER 1)\n")
 	sb.WriteString("2. **Current State** - Progress, what's done, what's in progress\n")
-	sb.WriteString("3. **Files & Changes** - Files modified/read with line numbers\n")
-	sb.WriteString("4. **Technical Context** - Decisions, patterns, commands\n")
-	sb.WriteString("5. **Next Steps** - Specific, actionable next steps\n\n")
+	sb.WriteString("3. **Files & Changes** - Files modified/read with line numbers (PRESERVE EXACT REFERENCES)\n")
+	sb.WriteString("4. **Technical Context** - Decisions made, patterns identified, commands used\n")
+	sb.WriteString("5. **Next Steps** - Specific, actionable next steps with code locations if known\n\n")
 
 	sb.WriteString("**Tone**: Brief a teammate taking over. No emojis. Be thorough but concise.\n")
+	sb.WriteString("**CRITICAL**: Preserve any file:line references (e.g., `foo.go:123`) exactly.\n")
 
 	return sb.String()
 }
