@@ -12,6 +12,12 @@ This recovery preserves two coherent local feature sets that were absent from th
 
 The database migration adds `sessions.total_tokens_summarized` with a zero default. The SQL source and generated query bindings both persist the field.
 
+## Agentic reliability
+
+- marks the agentic-fetch worker as a sub-agent so it bypasses the parent-held global request limiter instead of deadlocking;
+- records semantic code-location, decision, and successful-fix flags from the regex category that actually matched; and
+- verifies all three semantic categories plus the sub-agent limiter bypass with focused regressions.
+
 ## Plugin discovery
 
 Plugin directories are configured through `options.plugins_paths`, `FLOYD_PLUGINS_DIR`, and the standard global configuration locations. A plugin is a directory containing `PLUGIN.md` with YAML front matter and optional instruction text.

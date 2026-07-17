@@ -105,16 +105,16 @@ func CalculateSemanticScore(msg message.Message, position, totalMessages int) Se
 
 	// Check for high importance patterns
 	for _, pattern := range semanticHighImportancePatterns {
+		patternStr := pattern.String()
 		if pattern.MatchString(text) {
 			score.RawScore += 3
-			// Categorize what we found
-			if strings.Contains(pattern.String(), `\.`) || strings.Contains(pattern.String(), `:\d+`) {
+			if strings.Contains(patternStr, `\.`) || strings.Contains(patternStr, `:\d+`) {
 				score.HasCodeLocation = true
 			}
-			if strings.Contains(pattern.String(), `decid|chose|because|rationale`) {
+			if strings.Contains(patternStr, "decid") || strings.Contains(patternStr, "chose") || strings.Contains(patternStr, "because") || strings.Contains(patternStr, "rationale") {
 				score.HasDecision = true
 			}
-			if strings.Contains(pattern.String(), `fix|resolv|success|implement`) {
+			if strings.Contains(patternStr, "fix") || strings.Contains(patternStr, "resolv") || strings.Contains(patternStr, "success") || strings.Contains(patternStr, "implement") {
 				score.HasFixOutcome = true
 			}
 		}
