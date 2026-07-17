@@ -19,6 +19,9 @@
   ],
   "include": ["**"],
   "deny": [],
+  "secretFixtureAllowlist": [
+    "internal/config/load_test.go"
+  ],
   "baseBranch": "main",
   "publish": true,
   "allowLocalRemote": false
