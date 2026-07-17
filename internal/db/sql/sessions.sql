@@ -43,7 +43,8 @@ SET
     cache_read_tokens = ?,
     summary_message_id = ?,
     cost = ?,
-    todos = ?
+    todos = ?,
+    total_tokens_summarized = ?
 WHERE id = ?
 RETURNING *;
 

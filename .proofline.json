@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "gates": [
+    {
+      "name": "go-tests",
+      "command": ["go", "test", "./...", "-count=1"],
+      "required": true
+    },
+    {
+      "name": "go-vet",
+      "command": ["go", "vet", "./..."],
+      "required": true
+    },
+    {
+      "name": "go-build",
+      "command": ["go", "build", "./..."],
+      "required": true
+    }
+  ],
+  "include": ["**"],
+  "deny": [],
+  "baseBranch": "main",
+  "publish": true,
+  "allowLocalRemote": false
+}

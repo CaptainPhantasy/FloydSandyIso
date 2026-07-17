@@ -16,13 +16,13 @@ type ContextStatusResponse struct {
 	PromptTokens     int64   `json:"prompt_tokens"`
 	CompletionTokens int64   `json:"completion_tokens"`
 	CacheReadTokens  int64   `json:"cache_read_tokens"`
-	TotalTokens      int64   `json:"total_tokens"`       // prompt + completion
-	EffectiveTokens  int64   `json:"effective_tokens"`  // prompt + completion - cached
-	CachePercent     float64 `json:"cache_percent"`     // what % was served from cache
+	TotalTokens      int64   `json:"total_tokens"`     // prompt + completion
+	EffectiveTokens  int64   `json:"effective_tokens"` // prompt + completion - cached
+	CachePercent     float64 `json:"cache_percent"`    // what % was served from cache
 	ContextWindow    int64   `json:"context_window"`
-	PercentUsed      float64 `json:"percent_used"`      // based on TOTAL (conservative)
+	PercentUsed      float64 `json:"percent_used"` // based on TOTAL (conservative)
 	RemainingTokens  int64   `json:"remaining_tokens"`
-	ShouldHandoff    bool    `json:"should_handoff"`    // approaching limit, prepare for handoff
+	ShouldHandoff    bool    `json:"should_handoff"` // approaching limit, prepare for handoff
 	SessionID        string  `json:"session_id"`
 }
 
@@ -36,7 +36,7 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 				return fantasy.NewTextErrorResponse("no active session"), nil
 			}
 
-		sess, err := sessions.Get(ctx, sessionID)
+			sess, err := sessions.Get(ctx, sessionID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get session: %v", err)), nil
 			}
@@ -59,9 +59,16 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 
 			remaining := contextWindow - totalTokens
 
-			// Warn if approaching handoff threshold (50%+ of TOTAL)
-			// At 60%, automatic handoff will trigger with compaction
-			shouldHandoff := percentUsed >= 50.0
+			// Determine warning threshold based on context window size
+			// Large windows (>200k): warn when remaining < 20k tokens (~90% used)
+			// Small windows: warn when remaining < 20% of window (~80% used)
+			var warningThreshold int64
+			if contextWindow >= 200000 {
+				warningThreshold = 20000
+			} else {
+				warningThreshold = int64(float64(contextWindow) * 0.2)
+			}
+			shouldWarn := remaining <= warningThreshold
 
 			status := ContextStatusResponse{
 				PromptTokens:     sess.PromptTokens,
@@ -73,18 +80,18 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 				ContextWindow:    contextWindow,
 				PercentUsed:      percentUsed,
 				RemainingTokens:  remaining,
-				ShouldHandoff:    shouldHandoff,
+				ShouldHandoff:    shouldWarn,
 				SessionID:        sessionID,
 			}
 
 			// Human-readable summary with dual display
 			var summary string
-			if shouldHandoff {
+			if shouldWarn {
 				summary = fmt.Sprintf(
 					"⚠️ CONTEXT WARNING: %.1f%% of window used\n"+
 						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
 						"  Remaining: %d tokens | Window: %d\n"+
-						"  At 60%%, session will compact and continue. Consider being more concise.",
+						"  Session will compact when remaining tokens fall below threshold.",
 					percentUsed,
 					totalTokens, effectiveTokens, cachePercent,
 					remaining, contextWindow,

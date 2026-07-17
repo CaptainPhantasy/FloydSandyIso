@@ -53,7 +53,7 @@ var (
 )
 
 // NewSkillsLibrary creates a new skills library dialog.
-func NewSkillsLibrary(com *common.Common, skillsDir string) (*SkillsLibrary, error) {
+func NewSkillsLibrary(com *common.Common, skillsDirs []string) (*SkillsLibrary, error) {
 	s := &SkillsLibrary{com: com}
 
 	help := help.New()
@@ -87,14 +87,14 @@ func NewSkillsLibrary(com *common.Common, skillsDir string) (*SkillsLibrary, err
 	)
 	s.keyMap.Close = CloseKey
 
-	s.loadSkills(skillsDir)
+	s.loadSkills(skillsDirs)
 
 	return s, nil
 }
 
-// loadSkills loads skills from the specified directory.
-func (s *SkillsLibrary) loadSkills(dir string) {
-	s.skills = skills.Discover([]string{dir})
+// loadSkills loads skills from the specified directories.
+func (s *SkillsLibrary) loadSkills(dirs []string) {
+	s.skills = skills.Discover(dirs)
 
 	items := make([]list.FilterableItem, 0, len(s.skills))
 	for _, skill := range s.skills {

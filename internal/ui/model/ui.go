@@ -2098,8 +2098,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++ // Adjust for app margins
+			cur.X += m.layout.editor.Min.X
 			cur.Y += m.layout.editor.Min.Y
+			if styles.IsSuperFloydBinary() {
+				cur.Y += logo.PersistentBarHeight
+			}
 			// Offset for attachment row if present.
 			if len(m.attachments.List()) > 0 {
 				cur.Y++
@@ -2411,9 +2414,8 @@ func (m *UI) generateLayout(w, h int) layout {
 	helpHeight := 1
 	// The editor height
 	editorHeight := 5
-	// Add extra height for SuperFloyd persistent bar (6 lines)
 	if styles.IsSuperFloydBinary() {
-		editorHeight += 6
+		editorHeight += logo.PersistentBarHeight
 	}
 	// The sidebar width
 	sidebarWidth := 30
@@ -2955,11 +2957,16 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			}
 		}
 
-		// Generate followup suggestion asynchronously after successful response
-		// Skip in test environment to avoid VCR cassette mismatches
+		// Generate followup suggestion after successful Run.
+		// This runs inside the same Cmd so it waits for Run() to complete,
+		// but we log errors instead of silently swallowing them.
 		if !testing.Testing() {
-			suggestion, err := m.com.App.AgentCoordinator.SuggestFollowup(ctx, sessionID)
-			if err == nil && suggestion != "" {
+			suggestion, suggestErr := m.com.App.AgentCoordinator.SuggestFollowup(ctx, sessionID)
+			if suggestErr != nil {
+				slog.Warn("SuggestFollowup failed", "error", suggestErr, "sessionID", sessionID)
+				return nil
+			}
+			if suggestion != "" {
 				return aiSuggestionMsg(suggestion)
 			}
 		}
@@ -3168,10 +3175,10 @@ func (m *UI) openSkillsDialog() tea.Cmd {
 		return nil
 	}
 
-	// Get skills directory path (uses ~/.config/floyd/skills)
-	skillsDir := filepath.Join(home.Dir(), ".config", "floyd", "skills")
+	// Use skills paths from config (populated by GlobalSkillsDirs on load).
+	skillsDirs := m.com.Config().Options.SkillsPaths
 
-	skillsLibraryDialog, err := dialog.NewSkillsLibrary(m.com, skillsDir)
+	skillsLibraryDialog, err := dialog.NewSkillsLibrary(m.com, skillsDirs)
 	if err != nil {
 		return util.ReportError(err)
 	}
