@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/csync"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/fsext"
@@ -21,6 +19,8 @@ import (
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/session"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/common"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -45,8 +45,8 @@ type shadowCacheData struct {
 
 // shadowCache is a package-level cache for shadow status
 var shadowCache struct {
-	mu    sync.RWMutex
-	data  map[string]*shadowCacheData
+	mu   sync.RWMutex
+	data map[string]*shadowCacheData
 }
 
 func init() {
@@ -216,6 +216,11 @@ func renderHeaderDetails(
 	}
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)
+
+	if session.TotalTokensSummarized > 0 {
+		droppedParts := t.Header.Percentage.Foreground(t.Yellow).Render(fmt.Sprintf("%d dropped", session.TotalTokensSummarized))
+		parts = append(parts, droppedParts)
+	}
 
 	const keystroke = "ctrl+d"
 	if detailsOpen {

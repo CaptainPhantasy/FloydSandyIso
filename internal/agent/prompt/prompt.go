@@ -13,6 +13,7 @@ import (
 
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/home"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/plugins"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/shell"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/skills"
 )
@@ -27,16 +28,18 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider       string
+	Model          string
+	Config         config.Config
+	WorkingDir     string
+	IsGitRepo      bool
+	Platform       string
+	Date           string
+	GitStatus      string
+	ContextFiles   []ContextFile
+	AvailSkillXML  string
+	AvailPluginXML string
+	PluginInstrXML string
 }
 
 type ContextFile struct {
@@ -176,16 +179,31 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 		}
 	}
 
+	// Discover and load plugins metadata.
+	var availPluginXML, pluginInstrXML string
+	if len(cfg.Options.PluginsPaths) > 0 {
+		expandedPaths := make([]string, 0, len(cfg.Options.PluginsPaths))
+		for _, pth := range cfg.Options.PluginsPaths {
+			expandedPaths = append(expandedPaths, expandPath(pth, cfg))
+		}
+		if discoveredPlugins := plugins.Discover(expandedPaths); len(discoveredPlugins) > 0 {
+			availPluginXML = plugins.ToPromptXML(discoveredPlugins)
+			pluginInstrXML = plugins.ToInstructionsXML(discoveredPlugins)
+		}
+	}
+
 	isGit := isGitRepo(cfg.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:       provider,
+		Model:          model,
+		Config:         cfg,
+		WorkingDir:     filepath.ToSlash(workingDir),
+		IsGitRepo:      isGit,
+		Platform:       platform,
+		Date:           p.now().Format("1/2/2006"),
+		AvailSkillXML:  availSkillXML,
+		AvailPluginXML: availPluginXML,
+		PluginInstrXML: pluginInstrXML,
 	}
 	if isGit {
 		var err error

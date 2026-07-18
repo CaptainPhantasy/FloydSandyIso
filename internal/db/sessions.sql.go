@@ -33,7 +33,7 @@ INSERT INTO sessions (
     null,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos
+) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos, total_tokens_summarized
 `
 
 type CreateSessionParams struct {
@@ -70,6 +70,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.TotalTokensSummarized,
 	)
 	return i, err
 }
@@ -85,7 +86,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos, total_tokens_summarized
 FROM sessions
 WHERE id = ? LIMIT 1
 `
@@ -106,12 +107,13 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.TotalTokensSummarized,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos, total_tokens_summarized
 FROM sessions
 WHERE parent_session_id is NULL
 ORDER BY updated_at DESC
@@ -139,6 +141,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.CreatedAt,
 			&i.SummaryMessageID,
 			&i.Todos,
+			&i.TotalTokensSummarized,
 		); err != nil {
 			return nil, err
 		}
@@ -162,20 +165,22 @@ SET
     cache_read_tokens = ?,
     summary_message_id = ?,
     cost = ?,
-    todos = ?
+    todos = ?,
+    total_tokens_summarized = ?
 WHERE id = ?
-RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cache_read_tokens, cost, updated_at, created_at, summary_message_id, todos, total_tokens_summarized
 `
 
 type UpdateSessionParams struct {
-	Title            string         `json:"title"`
-	PromptTokens     int64          `json:"prompt_tokens"`
-	CompletionTokens int64          `json:"completion_tokens"`
-	CacheReadTokens  int64          `json:"cache_read_tokens"`
-	SummaryMessageID sql.NullString `json:"summary_message_id"`
-	Cost             float64        `json:"cost"`
-	Todos            sql.NullString `json:"todos"`
-	ID               string         `json:"id"`
+	Title                 string         `json:"title"`
+	PromptTokens          int64          `json:"prompt_tokens"`
+	CompletionTokens      int64          `json:"completion_tokens"`
+	CacheReadTokens       int64          `json:"cache_read_tokens"`
+	SummaryMessageID      sql.NullString `json:"summary_message_id"`
+	Cost                  float64        `json:"cost"`
+	Todos                 sql.NullString `json:"todos"`
+	TotalTokensSummarized int64          `json:"total_tokens_summarized"`
+	ID                    string         `json:"id"`
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
@@ -187,6 +192,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		arg.SummaryMessageID,
 		arg.Cost,
 		arg.Todos,
+		arg.TotalTokensSummarized,
 		arg.ID,
 	)
 	var i Session
@@ -203,6 +209,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.TotalTokensSummarized,
 	)
 	return i, err
 }

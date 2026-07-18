@@ -29,18 +29,19 @@ type Todo struct {
 }
 
 type Session struct {
-	ID               string
-	ParentSessionID  string
-	Title            string
-	MessageCount     int64
-	PromptTokens     int64
-	CompletionTokens int64
-	CacheReadTokens  int64
-	SummaryMessageID string
-	Cost             float64
-	Todos            []Todo
-	CreatedAt        int64
-	UpdatedAt        int64
+	ID                    string
+	ParentSessionID       string
+	Title                 string
+	MessageCount          int64
+	PromptTokens          int64
+	CompletionTokens      int64
+	CacheReadTokens       int64
+	SummaryMessageID      string
+	Cost                  float64
+	Todos                 []Todo
+	TotalTokensSummarized int64
+	CreatedAt             int64
+	UpdatedAt             int64
 }
 
 type Service interface {
@@ -169,6 +170,7 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
+		TotalTokensSummarized: session.TotalTokensSummarized,
 	})
 	if err != nil {
 		return Session{}, err
@@ -209,18 +211,19 @@ func (s service) fromDBItem(item db.Session) Session {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
 	return Session{
-		ID:               item.ID,
-		ParentSessionID:  item.ParentSessionID.String,
-		Title:            item.Title,
-		MessageCount:     item.MessageCount,
-		PromptTokens:     item.PromptTokens,
-		CompletionTokens: item.CompletionTokens,
-		CacheReadTokens:  item.CacheReadTokens,
-		SummaryMessageID: item.SummaryMessageID.String,
-		Cost:             item.Cost,
-		Todos:            todos,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
+		ID:                    item.ID,
+		ParentSessionID:       item.ParentSessionID.String,
+		Title:                 item.Title,
+		MessageCount:          item.MessageCount,
+		PromptTokens:          item.PromptTokens,
+		CompletionTokens:      item.CompletionTokens,
+		TotalTokensSummarized: item.TotalTokensSummarized,
+		CacheReadTokens:       item.CacheReadTokens,
+		SummaryMessageID:      item.SummaryMessageID.String,
+		Cost:                  item.Cost,
+		Todos:                 todos,
+		CreatedAt:             item.CreatedAt,
+		UpdatedAt:             item.UpdatedAt,
 	}
 }
 

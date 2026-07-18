@@ -25,3 +25,8 @@ floyd-sandy-iso
 floyd4
 FloydSandyIso
 floyd-sandy-iso
+
+# Additional compiled binaries
+/beast
+/superfloyd
+*.exe

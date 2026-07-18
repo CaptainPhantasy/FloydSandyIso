@@ -48,9 +48,10 @@ import (
 const (
 	defaultSessionName = "Untitled Session"
 
-	// Context window constants - currently unused but reserved for future logic
-	// Actual thresholds are defined inline in shouldSummarize checks (50%/60%)
-	_ = 0 // placeholder
+	// Constants for auto-summarization thresholds.
+	largeContextWindowThreshold = 200_000
+	largeContextWindowBuffer    = 20_000
+	smallContextWindowRatio     = 0.2
 )
 
 //go:embed templates/title.md
@@ -114,6 +115,29 @@ func withConcurrencyGate[T any](cooldown time.Duration, fn func() (T, error)) (T
 	}()
 
 	return fn()
+}
+
+// runWithRateLimit applies rate limiting only for main agents.
+// Sub-agents bypass the global limiter to prevent deadlock with parent.
+func (a *sessionAgent) runWithRateLimit(provider string, fn func() (*fantasy.AgentResult, error)) (*fantasy.AgentResult, error) {
+	// Sub-agents skip rate limiting to prevent deadlock with parent
+	if a.isSubAgent {
+		return fn()
+	}
+	return withRateLimitGate(a.cfg, provider, fn)
+}
+
+// safeStream wraps fantasy.Agent.Stream with panic recovery to gracefully handle
+// panics from external dependencies (e.g., nil pointer dereferences in provider hooks).
+// This provides defensive protection against bugs in the fantasy library.
+func safeStream(agent fantasy.Agent, ctx context.Context, call fantasy.AgentStreamCall) (result *fantasy.AgentResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Recovered from fantasy library panic", "panic", r)
+			err = fmt.Errorf("fantasy library panic: %v", r)
+		}
+	}()
+	return agent.Stream(ctx, call)
 }
 
 type SessionAgentCall struct {
@@ -316,54 +340,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		slog.Debug("preparePrompt file", "idx", i, "filename", f.Filename, "media_type", f.MediaType, "data_len", len(f.Data))
 	}
 
-	// PRE-FLIGHT TOKEN CHECK: Estimate tokens before API call to prevent crashes
-	// This fixes the token tracking discrepancy where displayed tokens (from last API response)
-	// don't account for new file contents being added to this request
-	// CRITICAL: Display underestimates by ~43% (140k shown = 200k actual with 202k window)
-	// Must use 50% threshold to hand off BEFORE actual limit is reached
-	contextWindow := int64(largeModel.CatwalkCfg.ContextWindow)
-	if largeModel.ModelCfg.ContextWindow > 0 {
-		contextWindow = largeModel.ModelCfg.ContextWindow
-	}
-	estimatedTokens := estimateTokensFromPrompt(history, files, call.Prompt, call.Attachments)
-	estimatedPercent := (float64(estimatedTokens) / float64(contextWindow)) * 100
-	slog.Debug("pre-flight token estimate", "estimated_tokens", estimatedTokens, "context_window", contextWindow, "percent", estimatedPercent)
-
-	// If estimated tokens exceed 50%, trigger early handoff to prevent API crash
-	// CRITICAL: 50% displayed ≈ 71% actual (144k / 202k) - safe handoff point
-	// 60% displayed ≈ 86% actual (173k / 202k) - risky
-	// 70% displayed ≈ 99% actual (200k / 202k) - TOO LATE, already crashing
-	if estimatedPercent >= 50.0 {
-		slog.Warn("pre-flight token check: approaching limit, triggering early handoff",
-			"estimated_tokens", estimatedTokens,
-			"context_window", contextWindow,
-			"percent", estimatedPercent,
-		)
-		// Create handoff file immediately
-		handoffErr := a.createHandoffFile(ctx, call.SessionID)
-		if handoffErr != nil {
-			slog.Error("failed to create handoff file during pre-flight check", "error", handoffErr)
-		}
-		// Return early with handoff message - use string response directly
-		handoffMsg := fmt.Sprintf("⚠️ Context limit approaching (%.1f%% estimated). Session handoff initiated to preserve your work.\n\nPlease restart the session to continue.", estimatedPercent)
-		return &fantasy.AgentResult{
-			Response: fantasy.Response{
-				Content: fantasy.ResponseContent{
-					fantasy.TextContent{Text: handoffMsg},
-				},
-			},
-		}, nil
-	}
-
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
-	var shouldHandoff bool
 
-	result, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+	result, err := a.runWithRateLimit(largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
+		return safeStream(agent, genCtx, fantasy.AgentStreamCall{
 			Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 			Files:            files,
 			Messages:         history,
@@ -458,18 +442,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 
 				currentAssistant = &assistantMsg
-
-				// EMERGENCY BRAKE: Check if a tool just injected a massive payload
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				if largeModel.ModelCfg.ContextWindow > 0 {
-					cw = largeModel.ModelCfg.ContextWindow
-				}
-				estTokens := estimateTokensFromPrompt(prepared.Messages, files, call.Prompt, call.Attachments)
-				if (float64(estTokens) / float64(cw)) > 0.85 {
-					// Abort the API call and force the orchestrator to run Summarize()
-					shouldSummarize = true
-					return callContext, prepared, fmt.Errorf("context spike detected: forcing emergency compaction")
-				}
 
 				return callContext, prepared, err
 			},
@@ -579,17 +551,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						cw = largeModel.ModelCfg.ContextWindow
 					}
 					tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-					percentUsed := (float64(tokens) / float64(cw)) * 100
-
-					// RESTORED COMPACTION: Trigger at 50% to keep the session alive
-					if percentUsed >= 50.0 {
-						shouldSummarize = true
-						return true
+					remaining := cw - tokens
+					var threshold int64
+					if cw >= largeContextWindowThreshold {
+						threshold = largeContextWindowBuffer
+					} else {
+						threshold = int64(float64(cw) * smallContextWindowRatio)
 					}
-
-					// Hard handoff at 60% - compact and continue session
-					if percentUsed >= 60.0 {
-						shouldHandoff = true
+					if (remaining <= threshold) && !a.disableAutoSummarize {
+						shouldSummarize = true
 						return true
 					}
 					return false
@@ -719,37 +689,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 	}
 
-	// Automatic handoff at 60% context — compact and continue session
-	if shouldHandoff {
-		// First, compact the session via summarization
-		if err := a.Summarize(ctx, call.SessionID, call.ProviderOptions); err != nil {
-			slog.Error("failed to summarize session before handoff", "error", err)
-		}
-
-		// Then create handoff file for documentation
-		if err := a.createHandoffFile(ctx, call.SessionID); err != nil {
-			slog.Error("failed to create handoff file", "error", err)
-		}
-
-		// Notify user of compaction
-		handoffMsg := "Context threshold reached (60%). Session compacted via summarization. Work preserved in HANDOFF.md. Continuing with trimmed context."
-
-		_, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
-			Role: message.Assistant,
-			Parts: []message.ContentPart{
-				message.TextContent{Text: handoffMsg},
-			},
-			Model:    largeModel.ModelCfg.Model,
-			Provider: largeModel.ModelCfg.Provider,
-		})
-		if err != nil {
-			slog.Error("failed to save compaction message", "error", err)
-		}
-
-		// Session continues - do NOT terminate
-		// Fall through to normal completion flow
-	}
-
 	// Release active request before processing queued messages.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
@@ -812,7 +751,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	summaryPromptText := buildTieredSummaryPrompt(currentSession.Todos, tc)
 
 	resp, err := withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+		return safeStream(agent, genCtx, fantasy.AgentStreamCall{
 			Prompt:          summaryPromptText,
 			Messages:        aiMsgs,
 			ProviderOptions: opts,
@@ -878,10 +817,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	droppedTokens := estimateTokensFromPrompt(aiMsgs, nil, summaryPromptText, nil)
 	currentSession.TotalTokensSummarized += droppedTokens
 
-	// Save the summary message ID but preserve cumulative token counts.
-	// Summarization is a side request - it should NOT reset the session's
-	// actual context consumption. The main conversation still consumed those tokens.
+	// Reset token counts after summarization - the old context is gone.
+	// Just in case, get just the last usage info.
+	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
+	currentSession.CompletionTokens = usage.OutputTokens
+	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
 	return err
 }
@@ -923,7 +864,7 @@ func (a *sessionAgent) SuggestFollowup(ctx context.Context, sessionID string) (s
 		fantasy.WithSystemPrompt(systemPrompt),
 	)
 
-	var maxTokens int64 = 50
+	var maxTokens int64 = 200
 	resp, err := withRateLimitGate(a.cfg, smallModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
 		return agent.Generate(ctx, fantasy.AgentCall{
 			Prompt:          "What should the user ask or do next?",
@@ -1118,8 +1059,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Use the small model to generate the title.
 	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	resp, err := withRateLimitGate(a.cfg, model.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-		return agent.Stream(ctx, streamCall)
+	resp, err := withRateLimitGate(a.cfg, smallModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
+		return safeStream(agent, ctx, streamCall)
 	})
 	if err == nil {
 		// We successfully generated a title with the small model.
@@ -1129,8 +1070,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
-		resp, err = withRateLimitGate(a.cfg, model.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
-			return agent.Stream(ctx, streamCall)
+		resp, err = withRateLimitGate(a.cfg, largeModel.ModelCfg.Provider, func() (*fantasy.AgentResult, error) {
+			return safeStream(agent, ctx, streamCall)
 		})
 		if err == nil {
 			slog.Debug("Generated title with large model")
@@ -1294,7 +1235,7 @@ func (a *sessionAgent) createHandoffFile(ctx context.Context, sessionID string) 
 	sb.WriteString("## SESSION HANDOFF\n\n")
 	sb.WriteString(fmt.Sprintf("**Previous Session ID:** %s\n", sessionID))
 	sb.WriteString(fmt.Sprintf("**Session Title:** %s\n", sess.Title))
-	sb.WriteString(fmt.Sprintf("**Reason:** Context window threshold reached (60%%).\n"))
+	sb.WriteString(fmt.Sprintf("**Reason:** Context window threshold reached (summarization triggered).\n"))
 	sb.WriteString(fmt.Sprintf("**Timestamp:** %s\n\n", time.Now().UTC().Format(time.RFC3339)))
 
 	sb.WriteString("### Active Todos\n\n")

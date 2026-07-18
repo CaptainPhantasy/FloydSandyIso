@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/styles"
 	"github.com/MakeNowJust/heredoc"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/slice"
-	"github.com/CaptainPhantasy/FloydSandyIso/internal/ui/styles"
 )
 
 // letterform represents a letterform. It can be stretched horizontally by
@@ -20,6 +20,11 @@ import (
 type letterform func(bool) string
 
 const diag = `╱`
+
+// PersistentBarHeight is the number of terminal rows the SuperFloyd
+// persistent ASCII-art bar occupies.  It must stay in sync with the
+// artLines slice in PersistentBar.
+const PersistentBarHeight = 6
 
 // Opts are the options for rendering the Floyd title art.
 type Opts struct {
@@ -152,10 +157,13 @@ func SmallRender(t *styles.Styles, width int) string {
 	title := t.Base.Foreground(t.Secondary).Render("LEGACY AI™")
 	brandName := "FLOYD"
 	if isSuperFloyd() {
-		// SuperFloyd: show SUPER over FLOYD with gradient
-		superTxt := styles.ApplyBoldForegroundGrad(t, "SUPER", t.Primary, t.Secondary)
-		floydTxt := styles.ApplyBoldForegroundGrad(t, "FLOYD", t.Secondary, t.Tertiary)
-		title = fmt.Sprintf("%s\n%s %s", title, superTxt, floydTxt)
+		// Detect if we should show "BEAST MODE" or "SUPERFLOYD"
+		name := strings.ToLower(filepath.Base(os.Args[0]))
+		brandName = "SUPERFLOYD"
+		if strings.Contains(name, "beast") {
+			brandName = "BEAST MODE"
+		}
+		title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t, brandName, t.Primary, t.Secondary))
 	} else {
 		title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t, brandName, t.Secondary, t.Primary))
 	}

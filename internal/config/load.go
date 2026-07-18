@@ -17,13 +17,13 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/agent/hyper"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/csync"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/env"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/fsext"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/home"
 	"github.com/CaptainPhantasy/FloydSandyIso/internal/log"
+	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 )
 
@@ -366,6 +366,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.SkillsPaths == nil {
 		c.Options.SkillsPaths = []string{}
 	}
+	if c.Options.PluginsPaths == nil {
+		c.Options.PluginsPaths = []string{}
+	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
@@ -407,6 +410,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	for _, dir := range GlobalSkillsDirs() {
 		if !slices.Contains(c.Options.SkillsPaths, dir) {
 			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)
+		}
+	}
+
+	// Add the default plugins directories if not already present.
+	for _, dir := range GlobalPluginsDirs() {
+		if !slices.Contains(c.Options.PluginsPaths, dir) {
+			c.Options.PluginsPaths = append(c.Options.PluginsPaths, dir)
 		}
 	}
 
@@ -928,6 +938,33 @@ func GlobalSkillsDirs() []string {
 	return []string{
 		filepath.Join(configBase, appName, "skills"),
 		filepath.Join(configBase, "agents", "skills"),
+	}
+}
+
+// GlobalPluginsDirs returns the default directories for Floyd Plugins.
+// Plugins in these directories are auto-discovered and provide extended
+// capabilities including skills, slash commands, sub-agents, and connector references.
+func GlobalPluginsDirs() []string {
+	if floydPlugins := os.Getenv("FLOYD_PLUGINS_DIR"); floydPlugins != "" {
+		return []string{floydPlugins}
+	}
+
+	// Determine the base config directory.
+	var configBase string
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		configBase = xdgConfigHome
+	} else if runtime.GOOS == "windows" {
+		configBase = cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+	} else {
+		configBase = filepath.Join(home.Dir(), ".config")
+	}
+
+	return []string{
+		filepath.Join(configBase, appName, "plugins"),
+		filepath.Join(configBase, "agents", "plugins"),
 	}
 }
 
